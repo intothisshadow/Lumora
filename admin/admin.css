@@ -1,0 +1,160 @@
+/* ============================================================
+   Lumora Gallery — Admin Panel Styles
+   admin.css
+   ============================================================ */
+
+/* ── Layout ───────────────────────────────────────────────── */
+:root {
+  --lum-adm-sidebar: 220px;
+  --lum-adm-topbar:  56px;
+  --lum-adm-dark:    #1a1a2e;
+  --lum-adm-darker:  #12122a;
+  --lum-adm-accent:  #5c75e8;
+  --lum-adm-hover:   rgba(255,255,255,.1);
+  --lum-adm-active:  rgba(92,117,232,.25);
+}
+
+html, body { height: 100%; }
+
+.lum-admin {
+  background: #f0f2f5;
+  font-size: .9rem;
+  min-height: 100vh;
+}
+
+/* ── Top bar ──────────────────────────────────────────────── */
+.lum-admin-topbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--lum-adm-topbar);
+  background: var(--lum-adm-darker);
+  z-index: 1030;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+
+/* ── Layout body ──────────────────────────────────────────── */
+.lum-admin-layout {
+  display: flex;
+  min-height: 100vh;
+  padding-top: var(--lum-adm-topbar);
+}
+
+/* ── Sidebar ──────────────────────────────────────────────── */
+.lum-admin-sidebar {
+  width: var(--lum-adm-sidebar);
+  flex-shrink: 0;
+  background: var(--lum-adm-dark);
+  min-height: calc(100vh - var(--lum-adm-topbar));
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: var(--lum-adm-topbar);
+  bottom: 0;
+  overflow-y: auto;
+}
+
+.lum-admin-nav li a {
+  display: block;
+  padding: .65rem 1rem;
+  color: rgba(255,255,255,.75);
+  text-decoration: none;
+  border-left: 3px solid transparent;
+  transition: background .15s, color .15s, border-color .15s;
+}
+
+.lum-admin-nav li a:hover {
+  background: var(--lum-adm-hover);
+  color: #fff;
+}
+
+.lum-admin-nav li.active a {
+  background: var(--lum-adm-active);
+  color: #fff;
+  border-left-color: var(--lum-adm-accent);
+  font-weight: 600;
+}
+
+/* ── Main content ─────────────────────────────────────────── */
+.lum-admin-main {
+  flex: 1;
+  margin-left: var(--lum-adm-sidebar);
+  min-width: 0;
+}
+
+/* ── Stat cards ───────────────────────────────────────────── */
+.lum-adm-stat {
+  background: #fff;
+  border-radius: .5rem;
+  padding: 1rem;
+  border: 1px solid #dee2e6;
+}
+
+.lum-adm-stat-num {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--lum-adm-accent);
+  line-height: 1;
+}
+
+.lum-adm-stat-lbl {
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #6c757d;
+}
+
+/* ── Tables ───────────────────────────────────────────────── */
+.lum-adm-table th {
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #6c757d;
+  background: #f8f9fa;
+  border-bottom: 2px solid #dee2e6;
+}
+
+/* ── Cards ────────────────────────────────────────────────── */
+.lum-adm-card {
+  background: #fff;
+  border-radius: .5rem;
+  border: 1px solid #dee2e6;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Progress bar for batch add ──────────────────────────── */
+#lum-batch-progress {
+  display: none;
+}
+
+/* ── Responsive ───────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .lum-admin-sidebar {
+    position: static;
+    width: 100%;
+    min-height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    overflow-x: auto;
+  }
+  .lum-admin-nav {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .lum-admin-nav li a {
+    white-space: nowrap;
+    border-left: none;
+    border-bottom: 3px solid transparent;
+  }
+  .lum-admin-nav li.active a {
+    border-left-color: transparent;
+    border-bottom-color: var(--lum-adm-accent);
+  }
+  .lum-admin-main {
+    margin-left: 0;
+  }
+  .lum-admin-gallery-name,
+  .lum-admin-version { display: none; }
+}

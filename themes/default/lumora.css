@@ -1,0 +1,267 @@
+/* ============================================================
+   Lumora Gallery — Default Theme
+   lumora.css
+   ============================================================ */
+
+/* ── Variables ────────────────────────────────────────────── */
+:root {
+  --lum-accent:       #0d6efd;
+  --lum-accent-dark:  #0b5ed7;
+  --lum-nav-bg:       #1a1a2e;
+  --lum-nav-fg:       rgba(255,255,255,.85);
+  --lum-nav-brand:    #ffffff;
+  --lum-footer-bg:    #f8f9fa;
+  --lum-card-radius:  .5rem;
+  --lum-thumb-radius: .375rem;
+  --lum-thumb-min:    160px;
+  --lum-gap:          .625rem;
+}
+
+/* ── Body ─────────────────────────────────────────────────── */
+.lum-body {
+  background: #f4f6f8;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.lum-main {
+  flex: 1;
+}
+
+/* ── Navbar ───────────────────────────────────────────────── */
+.lum-navbar {
+  background: var(--lum-nav-bg);
+  box-shadow: 0 2px 6px rgba(0,0,0,.3);
+}
+
+.lum-navbar .navbar-toggler-icon {
+  filter: invert(1);
+}
+
+.lum-brand {
+  color: var(--lum-nav-brand) !important;
+  font-weight: 700;
+  font-size: 1.2rem;
+  letter-spacing: .01em;
+}
+
+.lum-navbar .nav-link {
+  color: var(--lum-nav-fg) !important;
+  padding: .5rem .9rem;
+  border-radius: .3rem;
+  transition: color .15s, background .15s;
+}
+
+.lum-navbar .nav-link:hover,
+.lum-navbar .nav-link.active {
+  color: #fff !important;
+  background: rgba(255,255,255,.12);
+}
+
+/* Admin link in navbar */
+.lum-admin-link {
+  color: rgba(255,255,255,.7);
+  font-size: .85rem;
+  text-decoration: none;
+  padding: .3rem .7rem;
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: .3rem;
+  transition: color .15s, border-color .15s;
+}
+
+.lum-admin-link:hover {
+  color: #fff;
+  border-color: rgba(255,255,255,.6);
+}
+
+/* ── Footer ───────────────────────────────────────────────── */
+.lum-footer {
+  background: var(--lum-footer-bg);
+  border-top: 1px solid #e0e4e8;
+}
+
+.lum-footer a {
+  color: #6c757d;
+}
+
+/* ── Stats bar ────────────────────────────────────────────── */
+.lum-stat-box {
+  background: #fff;
+  border: 1px solid #e0e4e8;
+  border-radius: var(--lum-card-radius);
+  padding: .75rem .5rem;
+}
+
+.lum-stat-num {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--lum-accent);
+  line-height: 1.1;
+}
+
+.lum-stat-lbl {
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #6c757d;
+  margin-top: .15rem;
+}
+
+/* ── Category / Album card grid ───────────────────────────── */
+.lum-catcard {
+  border-radius: var(--lum-card-radius);
+  border: 1px solid #e0e4e8;
+  transition: box-shadow .2s, transform .2s;
+  overflow: hidden;
+}
+
+.lum-catcard:hover {
+  box-shadow: 0 4px 18px rgba(0,0,0,.12);
+  transform: translateY(-2px);
+}
+
+.lum-catcard .card-title a {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.lum-catcard .card-title a:hover {
+  color: var(--lum-accent);
+}
+
+.lum-catcard-img {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+}
+
+.lum-catcard-placeholder {
+  display: block;
+  width: 100%;
+  height: 120px;
+  background: #e9ecef;
+  color: #adb5bd;
+}
+
+.lum-card-desc {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ── Thumbnail grid ───────────────────────────────────────── */
+.lum-thumbgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--lum-thumb-min), 1fr));
+  gap: var(--lum-gap);
+  margin-bottom: 1.25rem;
+}
+
+.lum-thumb-item {
+  margin: 0;
+  background: #fff;
+  border: 1px solid #e0e4e8;
+  border-radius: var(--lum-thumb-radius);
+  overflow: hidden;
+  transition: box-shadow .2s, transform .2s;
+}
+
+.lum-thumb-item:hover {
+  box-shadow: 0 4px 14px rgba(0,0,0,.14);
+  transform: translateY(-2px);
+}
+
+.lum-thumb-item a {
+  display: block;
+  overflow: hidden;
+}
+
+.lum-thumb-item img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+  transition: transform .25s ease;
+}
+
+.lum-thumb-item:hover img {
+  transform: scale(1.04);
+}
+
+.lum-thumb-caption {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: .3rem .5rem;
+  font-size: .72rem;
+  color: #6c757d;
+  background: #fafbfc;
+  border-top: 1px solid #e9ecef;
+  line-height: 1.2;
+  gap: .25rem;
+}
+
+.lum-resolution {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lum-views::before {
+  content: '👁 ';
+  font-size: .65rem;
+}
+
+/* ── Sort bar ─────────────────────────────────────────────── */
+.lum-sort-bar {
+  background: #fff;
+  border: 1px solid #e0e4e8;
+  border-radius: var(--lum-card-radius);
+  padding: .5rem .75rem;
+}
+
+/* ── Pagination ───────────────────────────────────────────── */
+.lum-pagination .pagination {
+  margin-bottom: .4rem;
+}
+
+/* ── Breadcrumb ───────────────────────────────────────────── */
+.breadcrumb {
+  background: none;
+  padding: 0;
+  font-size: .9rem;
+}
+
+/* ── Section headings ─────────────────────────────────────── */
+.lum-section-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #343a40;
+  border-bottom: 2px solid #e0e4e8;
+  padding-bottom: .4rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Responsive tweaks ────────────────────────────────────── */
+@media (max-width: 575px) {
+  :root {
+    --lum-thumb-min: 130px;
+    --lum-gap: .4rem;
+  }
+  .lum-stat-num { font-size: 1.2rem; }
+}
+
+@media (min-width: 1200px) {
+  :root { --lum-thumb-min: 180px; }
+}
+
+/* ── PhotoSwipe download button ───────────────────────────── */
+.pswp__button--download-button {
+  width: 50px;
+  height: 60px;
+  padding: 10px;
+}
