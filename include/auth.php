@@ -5,6 +5,9 @@ declare(strict_types=1);
  *
  * Single-admin for V1; schema supports additional users/roles for future expansion.
  * Sessions are started by bootstrap.php before these functions are called.
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 if (!defined('LUMORA_ENTRY')) exit('Direct access denied.');

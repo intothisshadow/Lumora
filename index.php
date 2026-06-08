@@ -9,6 +9,9 @@ declare(strict_types=1);
  *   /?view=latest      → most recently added images
  *   /?view=most_viewed → all-time most viewed images
  *   /?view=random      → random selection
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 define('LUMORA_ENTRY', true);

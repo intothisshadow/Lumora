@@ -6,7 +6,11 @@ declare(strict_types=1);
  * URL: album.php?album=N[&sort=pos|newest|oldest|most_viewed|filename][&page=N]
  *
  * Displays paginated thumbnail grid for an album.
- * Increments album hit counter (session-throttled to one hit per album per visit).
+ * Increments album hit counter when count_album_views is enabled
+ * (session-throttled to one hit per album per visit).
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 define('LUMORA_ENTRY', true);
@@ -32,12 +36,17 @@ if (!$album) {
     exit;
 }
 
-// ── Album hit counter (once per session per album) ────────────────────────────
-$hit_key = 'alb_hit_' . $album_id;
-if (empty($_SESSION[$hit_key])) {
-    increment_album_hits($album_id);
-    $_SESSION[$hit_key] = true;
+// ── Album hit counter (session-throttled, honoring count_album_views config) ─
+if (lumora_config('count_album_views', '1') === '1') {
+    $hit_key = 'alb_hit_' . $album_id;
+    if (empty($_SESSION[$hit_key])) {
+        increment_album_hits($album_id);
+        $_SESSION[$hit_key] = true;
+    }
 }
+
+// ── Logging ───────────────────────────────────────────────────────────────────
+lumora_log('visit', 'album ' . $album_id . ' ' . ($_SERVER['REQUEST_URI'] ?? ''));
 
 // ── Category breadcrumb ───────────────────────────────────────────────────────
 $cat_trail  = get_category_breadcrumb((int) $album['category_id']);

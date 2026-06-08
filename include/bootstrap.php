@@ -20,6 +20,10 @@ declare(strict_types=1);
  *  10. template.php
  *  11. PHP session start
  *  12. Gallery config loaded from DB into $LUMORA_CONFIG
+ *  13. Timezone applied from config
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 if (!defined('LUMORA_ENTRY')) {
@@ -100,5 +104,15 @@ if (session_status() === PHP_SESSION_NONE) {
 
 // ── 12. Gallery config ───────────────────────────────────────────────────────
 lumora_load_config();
+
+// ── 13. Timezone ─────────────────────────────────────────────────────────────
+// Apply the timezone stored in config (default UTC).
+// @date_default_timezone_set() returns false for invalid identifiers; we fall
+// back to UTC silently rather than emitting a warning or breaking the page.
+$_lum_tz = (string) lumora_config('timezone', 'UTC');
+if ($_lum_tz === '' || !@date_default_timezone_set($_lum_tz)) {
+    date_default_timezone_set('UTC');
+}
+unset($_lum_tz);
 
 unset($_lumora_config_file);

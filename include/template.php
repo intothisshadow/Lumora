@@ -11,6 +11,9 @@ declare(strict_types=1);
  *   lumora_render_pagination(), lumora_render_sort_controls(),
  *   lumora_render_stats(), lumora_render_lightbox_js(),
  *   lumora_custom_header(), lumora_custom_footer(), lumora_render_nav()
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 if (!defined('LUMORA_ENTRY')) exit('Direct access denied.');
@@ -39,6 +42,19 @@ if (!defined('LUMORA_ENTRY')) exit('Direct access denied.');
  */
 function lumora_render_page(string $content, array $extra = []): void
 {
+    // ── Gallery offline mode ──────────────────────────────────────────────────
+    // Non-admin visitors see a maintenance page. Admins always see the real
+    // content so they can verify the gallery before bringing it back online.
+    if (lumora_config('gallery_offline', '0') === '1' && !lumora_is_admin()) {
+        http_response_code(503);
+        header('Retry-After: 3600');
+        $content = '<div class="alert alert-warning text-center my-5">'
+            . '<h2>Gallery Offline</h2>'
+            . '<p class="mb-0">This gallery is temporarily offline for maintenance. Please check back later.</p>'
+            . '</div>';
+        $extra = array_merge($extra, ['{PAGE_TITLE}' => 'Gallery Offline — ']);
+    }
+
     $theme        = lumora_active_theme();
     $theme_path   = lumora_theme_path($theme);
     $tpl_file     = $theme_path . 'template.html';

@@ -7,6 +7,9 @@ declare(strict_types=1);
  *   - Table-prefix support via {PREFIX} in SQL strings
  *   - Static singleton connection
  *   - Convenience helpers: fetchAll, fetchOne, fetchValue, insert, update, delete
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 if (!defined('LUMORA_ENTRY')) exit('Direct access denied.');

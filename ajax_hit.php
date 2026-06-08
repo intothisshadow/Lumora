@@ -20,7 +20,10 @@ declare(strict_types=1);
  *
  * JSON response:
  *   { "ok": true }   — counter incremented (or already counted this session)
- *   { "ok": false }  — missing / invalid image_id
+ *   { "ok": false }  — missing / invalid image_id, or gallery offline
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 define('LUMORA_ENTRY', true);
@@ -32,6 +35,13 @@ header('Content-Type: application/json; charset=utf-8');
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['ok' => false, 'error' => 'Method not allowed']);
+    exit;
+}
+
+// Gallery offline mode: silently accept the request so the JS caller does not
+// generate console errors, but do not count the hit.
+if (lumora_config('gallery_offline', '0') === '1') {
+    echo json_encode(['ok' => true]);
     exit;
 }
 

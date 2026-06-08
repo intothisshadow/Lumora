@@ -1,5 +1,5 @@
 -- Lumora Gallery — Database Schema
--- Version: 1
+-- Version: 2
 -- Requires: MySQL 5.7+ / MariaDB 10.3+
 -- Charset: utf8mb4 / utf8mb4_unicode_ci
 --
@@ -11,6 +11,10 @@
 --   {PREFIX}categories  — nested category tree (parent_id = 0 for root)
 --   {PREFIX}albums      — albums; each maps to a sub-folder of albums/
 --   {PREFIX}images      — individual images with dimensions and view counter
+--   {PREFIX}log         — activity log (used when log_mode = 'all'; DB version 2)
+--
+-- Migration from DB version 1:
+--   Run the CREATE TABLE statement for {PREFIX}log below (with your actual prefix).
 
 SET NAMES utf8mb4;
 
@@ -116,3 +120,23 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}images` (
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Images';
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- log  (DB version 2)
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Only used when log_mode = 'all' in gallery configuration.
+-- type: 'visit' | 'error' | 'info'
+-- ip:   IPv4 or IPv6 address of the client (up to 45 chars for IPv6).
+-- ──────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `{PREFIX}log` (
+  `id`         bigint UNSIGNED  NOT NULL AUTO_INCREMENT,
+  `type`       varchar(16)      NOT NULL COMMENT 'visit, error, info',
+  `message`    text             NOT NULL,
+  `ip`         varchar(45)      NOT NULL DEFAULT '',
+  `created_at` datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `type_created` (`type`, `created_at`)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Activity log (used when log_mode = all)';

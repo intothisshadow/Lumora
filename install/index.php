@@ -416,6 +416,7 @@ HTML;
 
     // Insert gallery config defaults.
     $config_defaults = [
+        // ── Core gallery settings ──────────────────────────────────────────
         'gallery_name'        => $gallery_name,
         'gallery_description' => '',
         'base_url'            => $base_url,
@@ -426,6 +427,15 @@ HTML;
         'allowed_extensions'  => 'jpg,jpeg,png,gif,webp',
         'custom_header_path'  => '',
         'custom_footer_path'  => '',
+        // ── Behaviour & logging (DB version 2) ────────────────────────────
+        'timezone'            => 'UTC',
+        'thumb_quality'       => '85',
+        'max_upload_size_mb'  => '0',
+        'max_image_width'     => '0',
+        'max_image_height'    => '0',
+        'count_album_views'   => '1',
+        'log_mode'            => 'off',
+        'gallery_offline'     => '0',
     ];
 
     try {

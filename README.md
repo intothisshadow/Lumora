@@ -127,7 +127,7 @@ migration straightforward — point Lumora at the same `albums/` directory and r
 - **Categories** — create, edit, delete; nested (parent/child); re-parents children on delete
 - **Albums** — create, edit, delete; auto-generated folder names or custom; filesystem directory creation
 - **Batch Add** — scan `albums/{folder}/` for new images, process in 50-image AJAX chunks (handles 9000+ without timeout)
-- **Configuration** — all settings in one form; theme selector; live image processor status
+- **Configuration** — all settings in one form; theme selector; live image processor status; gallery behavior and upload limit controls
 - **Config export/import** — JSON backup; import excludes `base_url` to protect other installs
 - **Maintenance → File Integrity Check** — scans all image records and verifies both the original file and its thumbnail exist on disk; runs in 500-image AJAX chunks (handles 500 000+ images); missing files shown in a results table with checkboxes; bulk-delete orphaned DB records in one click; only DB rows are removed, no files on disk touched
 - **Account** — update username and email address; change password with current-password verification
@@ -139,6 +139,7 @@ Themes live in `themes/{name}/` and require only `template.html`. Copy `themes/d
 - **Imagick PHP extension** preferred — auto-detected, no path configuration needed. Uses IM7 Q16-HDRI for high-quality Lanczos resizing, EXIF auto-orientation, and metadata stripping.
 - **GD library** fallback if the Imagick extension is not loaded.
 - Configurable max width and height (aspect ratio preserved, never upscaled).
+- Configurable JPEG/WebP quality (`thumb_quality`).
 - Thumbnails generated on Batch Add; never regenerated if `thumb_*` already exists.
 
 ---
@@ -157,6 +158,14 @@ All settings are managed in **Admin → Configuration**. Key options:
 | `allowed_extensions` | jpg,jpeg,png,gif,webp | Accepted image types for Batch Add |
 | `custom_header_path` | — | Path to a custom HTML header file (relative to Lumora root) |
 | `custom_footer_path` | — | Path to a custom HTML footer file |
+| `timezone` | UTC | PHP timezone identifier (e.g. `Europe/Helsinki`); applied at bootstrap |
+| `thumb_quality` | 85 | JPEG/WebP thumbnail quality 1–100 |
+| `max_upload_size_mb` | 0 | Max file size in MB for Batch Add; 0 = unlimited |
+| `max_image_width` | 0 | Max width for stored originals in px; 0 = no limit |
+| `max_image_height` | 0 | Max height for stored originals in px; 0 = no limit |
+| `count_album_views` | 1 | Toggle album hit counter (`0` = off, `1` = on) |
+| `log_mode` | off | Logging: `off`, `errors` (PHP error log), or `all` (error log + DB) |
+| `gallery_offline` | 0 | Maintenance mode — shows HTTP 503 to non-admins when `1` |
 
 Settings are stored in the `{PREFIX}config` database table and cached in `$LUMORA_CONFIG` per request.
 

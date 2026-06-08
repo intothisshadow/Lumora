@@ -1,34 +1,31 @@
 <?php
 declare(strict_types=1);
 /**
- * Lumora Gallery — File Integrity Check AJAX Handler
+ * Lumora Gallery — Reload Dimensions & File Size AJAX Handler
  *
- * Processes one chunk of image records and returns which files are missing.
- * Uses keyset pagination (WHERE id > last_id) so performance stays constant
- * even on galleries with 500 000+ images — plain OFFSET becomes progressively
- * slower beyond ~100 000 rows and is not used here.
+ * Re-reads the pixel dimensions and file size of each image from disk and
+ * writes the updated values back to the images table.  Useful after manually
+ * replacing image files, running an external resize tool, or migrating from
+ * another gallery system where the stored metadata may be wrong or missing.
+ *
+ * Uses keyset pagination (WHERE id > last_id) identical to the integrity
+ * scanner so query time stays constant regardless of gallery size.
+ * Original files are never modified.
  *
  * POST params:
- *   last_id    int     Highest image ID already checked (0 for first call)
- *   limit      int     Records to check this call (max 1000, default 500)
+ *   last_id    int     Highest image ID already processed (0 for first call)
+ *   limit      int     Records to process this call (max 200, default 100)
  *   album_id   int     Restrict to a specific album; 0 = all albums
  *   csrf_token string
  *
  * JSON response:
  *   {
- *     "checked":  500,
- *     "last_id":  12345,
- *     "missing":  [
- *       {
- *         "id":            42,
- *         "filename":      "photo.jpg",
- *         "album_title":   "Season 1",
- *         "folder":        "Xena/Season1",
- *         "orig_missing":  true,
- *         "thumb_missing": false
- *       }, …
- *     ],
- *     "done": false
+ *     "checked": N,   // rows fetched this chunk
+ *     "updated": N,   // DB rows successfully updated
+ *     "skipped": N,   // files not found or unreadable (non-fatal)
+ *     "last_id": N,   // highest id seen this chunk (keyset cursor)
+ *     "errors":  [],  // per-file error strings (unreadable images)
+ *     "done":    bool
  *   }
  */
 define('LUMORA_ENTRY', true);
@@ -55,21 +52,19 @@ if (
 
 // ── Input ─────────────────────────────────────────────────────────────────────
 $last_id  = lumora_int($_POST['last_id']  ?? 0, 0, 0);
-$limit    = lumora_int($_POST['limit']    ?? 500, 500, 1, 1000);
+$limit    = lumora_int($_POST['limit']    ?? 100, 100, 1, 200);
 $album_id = lumora_int($_POST['album_id'] ?? 0, 0, 0);
 
-// Give ourselves enough time for large chunks.
+// getimagesize() reads only image headers; 200 calls per chunk is fast.
 @set_time_limit(120);
 
 // ── Query chunk via keyset pagination ─────────────────────────────────────────
-// LEFT JOIN (all albums): catches image records whose album row has been deleted
-// (folder = null) — reported as [Album deleted].
-// INNER JOIN (single album): only images belonging to the specified album.
+// LEFT JOIN (when album_id = 0): catches records whose album was deleted.
+// INNER JOIN (when album_id > 0): only images belonging to the named album.
 try {
     if ($album_id > 0) {
         $rows = LumoraDB::fetchAll(
-            'SELECT i.id, i.filename, i.album_id,
-                    a.folder, a.title AS album_title
+            'SELECT i.id, i.filename, a.folder
              FROM `{PREFIX}images` i
              JOIN `{PREFIX}albums` a ON a.id = i.album_id
              WHERE i.id > ? AND i.album_id = ?
@@ -79,8 +74,7 @@ try {
         );
     } else {
         $rows = LumoraDB::fetchAll(
-            'SELECT i.id, i.filename, i.album_id,
-                    a.folder, a.title AS album_title
+            'SELECT i.id, i.filename, a.folder
              FROM `{PREFIX}images` i
              LEFT JOIN `{PREFIX}albums` a ON a.id = i.album_id
              WHERE i.id > ?
@@ -90,54 +84,64 @@ try {
         );
     }
 } catch (PDOException $e) {
-    error_log('Lumora integrity scan query error: ' . $e->getMessage());
+    error_log('Lumora dimensions scan query error: ' . $e->getMessage());
     http_response_code(500);
     echo json_encode(['error' => 'Database error during scan']);
     exit;
 }
 
 $checked  = count($rows);
-$done     = ($checked < $limit); // fewer rows than requested → end of table (in scope)
+$done     = ($checked < $limit);
 $new_last = $last_id;
-$missing  = [];
+$updated  = 0;
+$skipped  = 0;
+$errors   = [];
 
 foreach ($rows as $row) {
     $new_last = (int) $row['id'];
 
-    // Image whose album record no longer exists — both files are unreachable.
+    // Image whose album record was deleted — cannot locate the file.
     if ($row['folder'] === null) {
-        $missing[] = [
-            'id'           => (int) $row['id'],
-            'filename'     => $row['filename'],
-            'album_title'  => '[Album deleted]',
-            'folder'       => '',
-            'orig_missing'  => true,
-            'thumb_missing' => true,
-        ];
+        $skipped++;
         continue;
     }
 
-    $orig_path  = lumora_album_path($row['folder']) . $row['filename'];
-    $thumb_path = lumora_album_path($row['folder']) . LUMORA_THUMB_PREFIX . $row['filename'];
+    $path = lumora_album_path($row['folder']) . $row['filename'];
 
-    $orig_missing  = !file_exists($orig_path);
-    $thumb_missing = !file_exists($thumb_path);
+    if (!file_exists($path)) {
+        $skipped++;
+        continue;
+    }
 
-    if ($orig_missing || $thumb_missing) {
-        $missing[] = [
-            'id'           => (int) $row['id'],
-            'filename'     => $row['filename'],
-            'album_title'  => $row['album_title'] ?? '',
-            'folder'       => $row['folder'],
-            'orig_missing'  => $orig_missing,
-            'thumb_missing' => $thumb_missing,
-        ];
+    [$width, $height] = lumora_get_image_dimensions($path);
+    $filesize          = lumora_get_filesize($path);
+
+    if ($width === 0 || $height === 0) {
+        // File exists but getimagesize() could not read it (corrupt / unsupported format).
+        $errors[] = 'Unreadable: ' . $row['filename'];
+        $skipped++;
+        continue;
+    }
+
+    try {
+        LumoraDB::update(
+            'images',
+            ['width' => $width, 'height' => $height, 'filesize' => $filesize],
+            'id = ?',
+            [(int) $row['id']]
+        );
+        $updated++;
+    } catch (PDOException $e) {
+        $errors[] = 'DB error for ID ' . (int) $row['id'];
+        error_log('Lumora dimensions update error (id=' . (int) $row['id'] . '): ' . $e->getMessage());
     }
 }
 
 echo json_encode([
     'checked' => $checked,
+    'updated' => $updated,
+    'skipped' => $skipped,
     'last_id' => $new_last,
-    'missing' => $missing,
+    'errors'  => $errors,
     'done'    => $done,
 ]);

@@ -4,9 +4,12 @@ declare(strict_types=1);
  * Lumora Gallery — Core Functions
  *
  * Covers: config cache, gallery utility helpers, categories, albums, images,
- * stats, pagination, and path/URL helpers.
+ * stats, pagination, path/URL helpers, and activity logging.
  *
  * All SQL uses {PREFIX} which LumoraDB::query() replaces at runtime.
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 if (!defined('LUMORA_ENTRY')) exit('Direct access denied.');
@@ -50,6 +53,49 @@ function lumora_set_config(string $key, mixed $value): void
          ON DUPLICATE KEY UPDATE value = VALUES(value)',
         [$key, (string) $value]
     );
+}
+
+// ── Activity logging ──────────────────────────────────────────────────────────
+
+/**
+ * Log an event according to the configured log_mode.
+ *
+ * 'off'    — nothing is written.
+ * 'errors' — only events of $type === 'error' are written to the PHP error log.
+ * 'all'    — all events are written to the PHP error log AND inserted into
+ *            {PREFIX}log (requires the table added in DB version 2).
+ *            If the table does not exist the DB write fails silently so that
+ *            existing installs are unaffected until they run the migration.
+ *
+ * @param string $type    Short event category: 'visit', 'error', 'info'.
+ * @param string $message Human-readable description of the event.
+ */
+function lumora_log(string $type, string $message): void
+{
+    $mode = lumora_config('log_mode', 'off');
+    if ($mode === 'off') return;
+
+    // 'errors' mode: only write events of type 'error'.
+    if ($mode === 'errors' && $type !== 'error') return;
+
+    // Always write to the PHP error log.
+    error_log('Lumora [' . $type . ']: ' . $message);
+
+    // 'all' mode: also persist to the database.
+    if ($mode === 'all') {
+        try {
+            LumoraDB::query(
+                'INSERT INTO `{PREFIX}log` (type, message, ip) VALUES (?, ?, ?)',
+                [
+                    substr($type, 0, 16),
+                    substr($message, 0, 65535),
+                    substr((string) ($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45),
+                ]
+            );
+        } catch (\Throwable) {
+            // {PREFIX}log table absent on pre-v2 installs; fail silently.
+        }
+    }
 }
 
 // ── Output helpers ────────────────────────────────────────────────────────────

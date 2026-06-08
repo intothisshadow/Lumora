@@ -7,6 +7,9 @@ declare(strict_types=1);
  * Copy to config.php and fill in your values if you are setting up manually.
  *
  * DO NOT expose this file publicly; it contains your database credentials.
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 // ── Database ──────────────────────────────────────────────────────────────────

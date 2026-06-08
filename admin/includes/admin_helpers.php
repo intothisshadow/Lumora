@@ -7,6 +7,9 @@ declare(strict_types=1);
  *   lum_admin_page()      — render a full admin page
  *   lum_admin_alert()     — flash messages via session
  *   lum_admin_nav_item()  — sidebar nav item helper
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 if (!defined('LUMORA_ENTRY')) exit('Direct access denied.');
