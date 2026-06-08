@@ -6,7 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased] — 2026-06-08
 
+### Changed
+- `README.md` — added **Development** section crediting developer Ariane with
+  repository link (<https://code.unloved-hert.net/lumora/>).
+
+### 
+
 ### Added
+- **LICENSE** — project is now released under the GNU General Public License v3.0.
+  `LICENSE` file added to repository root.
+- **Developer credit** — `README.md` Development section lists developer Ariane with
+  repository link (<https://code.unloved-hert.net/lumora/>).
+
 - **Image view counter** — view counts are now actually recorded when visitors use
   the lightbox. Previously `increment_image_hits()` existed in the codebase but was
   never called, so the `hits` column stayed at 0 for every image.

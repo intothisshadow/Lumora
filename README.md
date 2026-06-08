@@ -187,6 +187,15 @@ A dedicated Coppermine → Lumora import tool (auto-creates categories, albums, 
 
 ---
 
+## Development
+
+| | |
+|---|---|
+| Developer | Ariane |
+| Repository | <https://code.unloved-hert.net/lumora/> |
+
+---
+
 ## Changelog
 
 See [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
@@ -195,4 +204,5 @@ See [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 
 ## License
 
-To be decided.
+Lumora Gallery is released under the [GNU General Public License v3.0](LICENSE).  
+You are free to use, modify, and distribute it under the terms of that license.
