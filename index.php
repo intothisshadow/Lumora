@@ -4,7 +4,7 @@ declare(strict_types=1);
  * Lumora Gallery — Homepage / Category browser
  *
  * Routes:
- *   /              → gallery home: stats + root categories
+ *   /              → gallery home: recently updated albums + categories + latest additions + stats + who is online
  *   /?cat=N        → browse a category (sub-categories + albums)
  *   /?view=latest      → most recently added images
  *   /?view=most_viewed → all-time most viewed images
@@ -25,8 +25,8 @@ $view    = in_array($_GET['view'] ?? '', ['latest', 'most_viewed', 'random'], tr
 $per_page = max(12, (int) lumora_config('per_page', 48));
 $page    = lumora_int($_GET['page'] ?? 1, 1, 1);
 
-// ── Track album hits (session throttle) ───────────────────────────────────────
-// (handled on album.php)
+// ── Track visitor for "Who Is Online" ─────────────────────────────────────────
+lumora_track_visitor();
 
 // ── Route ─────────────────────────────────────────────────────────────────────
 $content    = '';
@@ -87,17 +87,26 @@ if ($view !== '') {
     }
 } else {
     // ── Home page ─────────────────────────────────────────────────────────
-    $stats     = get_gallery_stats();
-    $root_cats = get_categories(0);
-    $latest    = get_latest_images(8);
+    $stats               = get_gallery_stats();
+    $root_cats           = get_categories(0);
+    $latest              = get_latest_images(8);
+    $latest_albums_count = max(0, (int) lumora_config('latest_albums_count', '5'));
+    $latest_albums       = $latest_albums_count > 0 ? get_latest_updated_albums($latest_albums_count) : [];
 
-    $content = lumora_render_stats($stats);
+    // 1. Recently Updated Albums (above categories)
+    if (!empty($latest_albums)) {
+        $content .= '<h2 class="lum-section-title">Recently Updated</h2>'
+            . lumora_render_catgrid($latest_albums, 'album');
+    }
 
+    // 2. Root categories
     if (!empty($root_cats)) {
-        $content .= '<h2 class="lum-section-title">Categories</h2>'
+        $mt = !empty($latest_albums) ? ' mt-4' : '';
+        $content .= '<h2 class="lum-section-title' . $mt . '">Categories</h2>'
             . lumora_render_catgrid($root_cats, 'category');
     }
 
+    // 3. Latest Additions (thumbnail grid)
     if (!empty($latest)) {
         $base     = h(lumora_base_url());
         $content .= '<div class="d-flex justify-content-between align-items-center mt-4 mb-2">'
@@ -108,10 +117,18 @@ if ($view !== '') {
             . lumora_render_lightbox_js(lumora_base_url());
     }
 
+    // Empty gallery notice
     if (empty($root_cats) && empty($latest)) {
         $content .= '<div class="alert alert-info">The gallery is empty. '
             . '<a href="' . h(lumora_base_url() . 'admin/') . '">Add some content</a> to get started.</div>';
     }
+
+    // 4. Stats (moved to bottom)
+    $content .= '<hr class="mt-4">'
+        . lumora_render_stats($stats);
+
+    // 5. Who Is Online
+    $content .= lumora_render_who_is_online();
 }
 
 lumora_render_page($content, ['{PAGE_TITLE}' => $page_title]);

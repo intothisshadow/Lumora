@@ -87,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Create the filesystem directory.
             $dir = LUMORA_ALBUMS_PATH . $folder;
             if (!is_dir($dir)) {
-                if (!@mkdir($dir, 0755, true)) {
+                if (!mkdir($dir, 0755, true)) {
                     lum_flash('Album saved but could not create directory albums/' . $folder . '/. Create it manually via FTP.', 'warning');
                     lumora_redirect($base);
                 }
@@ -100,10 +100,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($act === 'delete') {
         $del_id = lumora_int($_POST['id'] ?? 0, 0, 1);
         if ($del_id > 0) {
-            // Delete images first, then album.
+            // Fetch the folder path before deleting so we can attempt removal if empty.
+            $del_album = LumoraDB::fetchOne(
+                'SELECT folder FROM `{PREFIX}albums` WHERE id = ?', [$del_id]
+            );
             LumoraDB::delete('images', 'album_id = ?', [$del_id]);
             LumoraDB::delete('albums', 'id = ?', [$del_id]);
-            lum_flash('Album deleted. Image files on disk were NOT removed.');
+
+            // If the physical folder exists and is now empty, remove it.
+            $folder_msg = ' Image files on disk were NOT removed.';
+            if ($del_album && $del_album['folder'] !== '') {
+                $dir = LUMORA_ALBUMS_PATH . $del_album['folder'];
+                if (is_dir($dir)) {
+                    $scan     = scandir($dir);
+                    $is_empty = ($scan !== false && count($scan) === 2); // only . and ..
+                    if ($is_empty) {
+                        if (rmdir($dir)) {
+                            $folder_msg = ' Empty folder albums/' . $del_album['folder'] . '/ was removed.';
+                        } else {
+                            $folder_msg = ' Folder albums/' . $del_album['folder'] . '/ could not be removed — delete it manually via FTP.';
+                        }
+                    } else {
+                        $folder_msg = ' Folder albums/' . $del_album['folder'] . '/ is not empty — files kept on disk.';
+                    }
+                } else {
+                    $folder_msg = ' No folder found on disk for albums/' . $del_album['folder'] . '/';
+                }
+            }
+            lum_flash('Album deleted.' . $folder_msg);
         }
         lumora_redirect($base);
     }
@@ -204,16 +228,28 @@ HTML;
 
 // ── List ─────────────────────────────────────────────────────────────────────
 $filter_cat = lumora_int($_GET['cat'] ?? 0, 0, 0);
-$filter_sql = $filter_cat > 0 ? ' WHERE a.category_id = ' . $filter_cat : '';
 
-$albums = LumoraDB::fetchAll(
-    'SELECT a.*, c.name AS cat_name,
-            (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
-     FROM `{PREFIX}albums` a
-     LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id'
-    . $filter_sql .
-    ' ORDER BY c.name ASC, a.pos ASC, a.title ASC'
-);
+// Use dedicated queries per code path so each variant uses a proper prepared
+// statement rather than concatenating an integer into the SQL string.
+if ($filter_cat > 0) {
+    $albums = LumoraDB::fetchAll(
+        'SELECT a.*, c.name AS cat_name,
+                (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
+         FROM `{PREFIX}albums` a
+         LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id
+         WHERE a.category_id = ?
+         ORDER BY c.name ASC, a.pos ASC, a.title ASC',
+        [$filter_cat]
+    );
+} else {
+    $albums = LumoraDB::fetchAll(
+        'SELECT a.*, c.name AS cat_name,
+                (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
+         FROM `{PREFIX}albums` a
+         LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id
+         ORDER BY c.name ASC, a.pos ASC, a.title ASC'
+    );
+}
 
 $rows = '';
 if (empty($albums)) {
@@ -226,9 +262,10 @@ if (empty($albums)) {
         $vis_h    = $a['visibility'] ? '<span class="badge bg-secondary">Private</span>' : '<span class="badge bg-success">Public</span>';
         $img_cnt  = number_format((int)$a['image_count']);
         $edit_url = h($base . '?action=edit&id=' . (int)$a['id']);
-        $batch_url= h(lumora_base_url() . 'admin/batch.php?album=' . (int)$a['id']);
-        $view_url = h(lumora_base_url() . 'album.php?album=' . (int)$a['id']);
-        $del_conf = "Delete album '" . addslashes($a['title']) . "'? All database records will be removed (files kept on disk).";
+        $batch_url  = h(lumora_base_url() . 'admin/batch.php?album=' . (int)$a['id']);
+        $images_url = h(lumora_base_url() . 'admin/images.php?album=' . (int)$a['id']);
+        $view_url   = h(lumora_base_url() . 'album.php?album=' . (int)$a['id']);
+        $del_conf   = h('Delete album \'' . $a['title'] . '\'? All DB records will be removed. If the album folder is empty it will also be deleted; otherwise files on disk are kept.');
         $rows .= <<<HTML
 <tr>
   <td><a href="{$edit_url}">{$title_h}</a></td>
@@ -238,11 +275,12 @@ if (empty($albums)) {
   <td>{$vis_h}</td>
   <td>
     <a href="{$batch_url}" class="btn btn-sm btn-outline-primary" title="Batch Add">⬆️</a>
+    <a href="{$images_url}" class="btn btn-sm btn-outline-secondary" title="Manage Images">📸</a>
     <a href="{$view_url}" class="btn btn-sm btn-outline-secondary" target="_blank" title="View album">↗</a>
     <a href="{$edit_url}" class="btn btn-sm btn-outline-secondary" title="Edit">✏️</a>
   </td>
   <td>
-    <form method="post" action="{$base_h}" onsubmit="return confirm('{$del_conf}')">
+    <form method="post" action="{$base_h}" data-confirm="{$del_conf}" onsubmit="return confirm(this.dataset.confirm)">
       <input type="hidden" name="action"     value="delete">
       <input type="hidden" name="id"         value="{$a['id']}">
       <input type="hidden" name="csrf_token" value="{$csrf}">

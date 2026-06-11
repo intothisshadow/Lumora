@@ -44,11 +44,15 @@ Lumora/
 │   ├── albums.php              Album management
 │   ├── batch.php               Batch-add images from FTP
 │   ├── ajax_batch.php          AJAX endpoint for chunked batch processing
+│   ├── ajax_image_delete.php    AJAX endpoint for bulk image deletion
+│   ├── ajax_image_move.php      AJAX endpoint for bulk image move between albums
+│   ├── ajax_image_rethumb.php   AJAX endpoint for single-image thumbnail regeneration
 │   ├── ajax_integrity.php      AJAX endpoint for integrity scan chunks
 │   ├── ajax_integrity_delete.php  AJAX endpoint for deleting orphaned records
 │   ├── categories.php          Category management
 │   ├── config.php              Gallery settings, export/import
 │   ├── dashboard.php           Stats overview
+│   ├── images.php               Image management (edit, delete, move, bulk actions)
 │   ├── maintenance.php         Maintenance tools (File Integrity Check)
 │   ├── login.php / logout.php
 │   └── admin.css
@@ -124,8 +128,9 @@ migration straightforward — point Lumora at the same `albums/` directory and r
 
 ### Admin panel
 - **Dashboard** — stats cards + latest images
-- **Categories** — create, edit, delete; nested (parent/child); re-parents children on delete
-- **Albums** — create, edit, delete; auto-generated folder names or custom; filesystem directory creation
+- **Categories** — create, edit, delete; nested (parent/child); re-parents children on delete; optional cover image (ID-based, falls back to first image in category's albums)
+- **Albums** — create, edit, delete; auto-generated folder names or custom; filesystem directory creation; empty folder removed automatically on album delete
+- **Images** — per-album paginated image grid (24/page); edit title, sort position, and visibility; optional file replacement via multipart upload (validates type, size, image integrity; regenerates thumbnail and updates dimensions/filesize); single-image delete cleans up disk files and resets album/category cover references; bulk delete and bulk move to another album (up to 500 images per AJAX call); per-image thumbnail regeneration
 - **Batch Add** — scan `albums/{folder}/` for new images, process in 50-image AJAX chunks (handles 9000+ without timeout)
 - **Configuration** — all settings in one form; theme selector; live image processor status; gallery behavior and upload limit controls
 - **Config export/import** — JSON backup; import excludes `base_url` to protect other installs
@@ -166,6 +171,8 @@ All settings are managed in **Admin → Configuration**. Key options:
 | `count_album_views` | 1 | Toggle album hit counter (`0` = off, `1` = on) |
 | `log_mode` | off | Logging: `off`, `errors` (PHP error log), or `all` (error log + DB) |
 | `gallery_offline` | 0 | Maintenance mode — shows HTTP 503 to non-admins when `1` |
+| `latest_albums_count` | 5 | Number of recently updated albums shown on the home page; `0` = hide section |
+| `show_powered_by` | 1 | Show a "Powered by Lumora Gallery" credit in the footer (`0` = hidden); uses `{POWERED_BY}` theme token |
 
 Settings are stored in the `{PREFIX}config` database table and cached in `$LUMORA_CONFIG` per request.
 
@@ -193,6 +200,10 @@ A dedicated Coppermine → Lumora import tool (auto-creates categories, albums, 
 - The `install/` directory should be **deleted or access-restricted** after installation.
 - All POST actions use CSRF tokens. Admin routes require an authenticated session.
 - Passwords are hashed with `password_hash()` / `PASSWORD_DEFAULT`.
+- The **Remember Me** cookie uses a split-token scheme: the validator is stored as
+  `SHA-256(validator)` in the database only; the plain value travels only in the
+  browser cookie. Tokens are rotated on every use and all tokens for a user are
+  revoked on explicit logout.
 
 ---
 

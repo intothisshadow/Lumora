@@ -5,6 +5,9 @@ declare(strict_types=1);
  *
  * Handles all gallery settings stored in lum_config.
  * Also provides config export (JSON download) and import.
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 define('LUMORA_ENTRY', true);
 require_once dirname(__DIR__) . '/include/bootstrap.php';
@@ -17,9 +20,16 @@ $base_h = h($base);
 
 // ── Config export ─────────────────────────────────────────────────────────────
 if (isset($_GET['export'])) {
-    lumora_csrf_validate();  // CSRF via GET param handled below
-    // Validate via header since it's a GET request; accept only when admin.
-    // (lumora_require_admin() already ran above)
+    // CSRF: the export link embeds the token in the query string; validate it here.
+    // lumora_csrf_validate() checks $_POST only, so we validate $_GET directly.
+    // The admin session check (lumora_require_admin() above) is the primary guard.
+    if (
+        !isset($_GET['csrf_token']) ||
+        !hash_equals(lumora_csrf_token(), $_GET['csrf_token'])
+    ) {
+        http_response_code(403);
+        exit('CSRF validation failed.');
+    }
     $rows = LumoraDB::fetchAll('SELECT name, value FROM `{PREFIX}config` ORDER BY name ASC');
     $data = [];
     foreach ($rows as $r) { $data[$r['name']] = $r['value']; }
@@ -48,11 +58,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'thumb_quality',
             'max_upload_size_mb', 'max_image_width', 'max_image_height',
             'count_album_views', 'log_mode', 'gallery_offline',
+            'latest_albums_count',
+            'who_is_online_duration',
+            'show_powered_by',
         ];
 
         // Boolean checkbox keys: always save even when not present in POST
         // (unchecked checkbox sends nothing; hidden input handles the default).
-        $bool_keys = ['count_album_views', 'gallery_offline'];
+        $bool_keys = ['count_album_views', 'gallery_offline', 'show_powered_by'];
 
         foreach ($allowed as $key) {
             if (in_array($key, $bool_keys, true)) {
@@ -68,6 +81,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'max_upload_size_mb',
                     'max_image_width',
                     'max_image_height'                      => (string) max(0, (int) $_POST[$key]),
+                    'latest_albums_count'                   => (string) max(0, min(50, (int) $_POST[$key])),
+                    'who_is_online_duration'                 => (string) max(1, min(60, (int) $_POST[$key])),
                     'log_mode'                              => in_array($_POST[$key], ['off', 'errors', 'all'], true)
                                                                 ? $_POST[$key] : 'off',
                     'timezone'                              => in_array(trim($_POST[$key]), \DateTimeZone::listIdentifiers(), true)
@@ -103,6 +118,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'timezone', 'thumb_quality',
             'max_upload_size_mb', 'max_image_width', 'max_image_height',
             'count_album_views', 'log_mode', 'gallery_offline',
+            'latest_albums_count', 'who_is_online_duration',
+            'show_powered_by',
         ];
         $imported = 0;
         foreach ($data['lumora_config'] as $k => $v) {
@@ -137,6 +154,9 @@ $cfg = [
     'count_album_views'   => lumora_config('count_album_views',   '1'),
     'log_mode'            => lumora_config('log_mode',            'off'),
     'gallery_offline'     => lumora_config('gallery_offline',     '0'),
+    'latest_albums_count' => lumora_config('latest_albums_count', '5'),
+    'who_is_online_duration' => lumora_config('who_is_online_duration', '5'),
+    'show_powered_by'        => lumora_config('show_powered_by',        '1'),
 ];
 
 // Detect active image processor (no config needed — auto-detected at runtime).
@@ -177,7 +197,10 @@ $sel_log_off    = $cfg['log_mode'] === 'off'    ? ' selected' : '';
 $sel_log_errors = $cfg['log_mode'] === 'errors' ? ' selected' : '';
 $sel_log_all    = $cfg['log_mode'] === 'all'    ? ' selected' : '';
 $chk_album_views = $cfg['count_album_views'] === '1' ? ' checked' : '';
-$chk_offline     = $cfg['gallery_offline']   === '1' ? ' checked' : '';
+$chk_offline      = $cfg['gallery_offline']   === '1' ? ' checked' : '';
+$chk_powered_by   = $cfg['show_powered_by']   === '1' ? ' checked' : '';
+$v_latest_albums  = h($cfg['latest_albums_count']);
+$v_who_online_dur = h($cfg['who_is_online_duration']);
 
 $export_url = h($base . '?export=1&csrf_token=' . urlencode(lumora_csrf_token()));
 $processor_h = h($processor_status);
@@ -215,6 +238,16 @@ $content = <<<HTML
       <label class="form-label fw-semibold">Active Theme</label>
       <select name="theme" class="form-select" style="max-width:220px">{$theme_opts}</select>
       <div class="form-text">Themes are folders inside <code>themes/</code> that contain a <code>template.html</code>.</div>
+    </div>
+
+    <div class="mb-3">
+      <div class="form-check form-switch">
+        <input type="hidden" name="show_powered_by" value="0">
+        <input class="form-check-input" type="checkbox" id="show_powered_by"
+               name="show_powered_by" value="1"{$chk_powered_by}>
+        <label class="form-check-label fw-semibold" for="show_powered_by">Show Powered By Credit</label>
+      </div>
+      <div class="form-text">Display a &ldquo;Powered by Lumora Gallery&rdquo; credit in the site footer. Themes use the <code>{POWERED_BY}</code> template token to control placement.</div>
     </div>
 
     <!-- ── Images & Thumbnails ────────────────────────────────────── -->
@@ -366,6 +399,21 @@ $content = <<<HTML
     </div>
 
     <!-- ── Upload & Image Limits ──────────────────────────────────── -->
+    <div class="row g-3 mb-3">
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Latest Updated Albums (home page)</label>
+        <input type="number" name="latest_albums_count" value="{$v_latest_albums}"
+               class="form-control" min="0" max="50" style="max-width:120px">
+        <div class="form-text">How many recently updated albums to display on the home page. Set to <code>0</code> to hide the section.</div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Who Is Online — Window (minutes)</label>
+        <input type="number" name="who_is_online_duration" value="{$v_who_online_dur}"
+               class="form-control" min="1" max="60" style="max-width:120px">
+        <div class="form-text">Visitors active within this many minutes are counted as online. Default 5. Range 1–60.</div>
+      </div>
+    </div>
+
     <hr class="my-4">
     <h6 class="mb-3 text-muted">Upload &amp; Image Limits</h6>
     <p class="text-muted small mb-3">These limits are applied per image during <strong>Batch Add</strong>. Originals that exceed the dimension limits are downscaled in-place (overwriting the source file); originals that exceed the file-size limit are skipped entirely.</p>

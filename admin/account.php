@@ -9,6 +9,9 @@ declare(strict_types=1);
  *
  * V1 is single-user, but the page reads/writes the `users` table so it will
  * continue to work correctly when multi-user support is added in future.
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 define('LUMORA_ENTRY', true);
 require_once dirname(__DIR__) . '/include/bootstrap.php';

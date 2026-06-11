@@ -19,6 +19,7 @@ declare(strict_types=1);
  *   9. thumb.php
  *  10. template.php
  *  11. PHP session start
+ * 11a. Remember-me auto-login (persistent cookie re-authentication)
  *  12. Gallery config loaded from DB into $LUMORA_CONFIG
  *  13. Timezone applied from config
  *
@@ -80,7 +81,8 @@ require_once LUMORA_INCLUDE . 'db.php';
 try {
     LumoraDB::connect(DB_HOST, DB_NAME, DB_USER, DB_PASS, DB_PREFIX, DB_CHARSET);
 } catch (RuntimeException $e) {
-    exit('Database connection failed. Please check your config.php settings.<br>' . htmlspecialchars($e->getMessage()));
+    error_log('Lumora: database connection error: ' . $e->getMessage());
+    exit('Database connection failed. Please check your config.php settings.');
 }
 
 // ── 7–10. Includes ───────────────────────────────────────────────────────────
@@ -102,17 +104,27 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// ── 11a. Remember-me auto-login ─────────────────────────────────────────────
+// If no active admin session exists, attempt to re-authenticate transparently
+// via a persistent remember-me cookie (30-day split-token scheme).
+// This must run after session_start() and after auth.php is loaded (step 8),
+// but before any page-level lumora_require_admin() call can redirect to login.
+if (!lumora_is_logged_in()) {
+    lumora_check_remember_cookie();
+}
+
 // ── 12. Gallery config ───────────────────────────────────────────────────────
 lumora_load_config();
 
 // ── 13. Timezone ─────────────────────────────────────────────────────────────
 // Apply the timezone stored in config (default UTC).
-// @date_default_timezone_set() returns false for invalid identifiers; we fall
-// back to UTC silently rather than emitting a warning or breaking the page.
+// Validate against the known list before calling date_default_timezone_set()
+// so that unknown identifiers fall back to UTC cleanly without the @ operator.
 $_lum_tz = (string) lumora_config('timezone', 'UTC');
-if ($_lum_tz === '' || !@date_default_timezone_set($_lum_tz)) {
-    date_default_timezone_set('UTC');
+if ($_lum_tz === '' || !in_array($_lum_tz, \DateTimeZone::listIdentifiers(), true)) {
+    $_lum_tz = 'UTC';
 }
+date_default_timezone_set($_lum_tz);
 unset($_lum_tz);
 
 unset($_lumora_config_file);

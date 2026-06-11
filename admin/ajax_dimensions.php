@@ -56,7 +56,7 @@ $limit    = lumora_int($_POST['limit']    ?? 100, 100, 1, 200);
 $album_id = lumora_int($_POST['album_id'] ?? 0, 0, 0);
 
 // getimagesize() reads only image headers; 200 calls per chunk is fast.
-@set_time_limit(120);
+set_time_limit(120);
 
 // ── Query chunk via keyset pagination ─────────────────────────────────────────
 // LEFT JOIN (when album_id = 0): catches records whose album was deleted.

@@ -84,8 +84,11 @@ $thn_chunk = 20;
 
 // ── JS-safe values ────────────────────────────────────────────────────────────
 // json_encode produces a properly quoted, escaped JS string literal for CSRF.
-$csrf_js     = json_encode(lumora_csrf_token());
-$maint_url_h = h(lumora_base_url() . 'admin/maintenance.php');
+$csrf_js      = json_encode(lumora_csrf_token());
+// Use the configured base_url (from DB) rather than reconstructing from $_SERVER
+// to avoid HTTP_HOST injection and keep the URL consistent with the rest of the app.
+$ajax_base_js = json_encode(lumora_base_url() . 'admin/');
+$maint_url_h  = h(lumora_base_url() . 'admin/maintenance.php');
 
 $content = <<<HTML
 <!-- ── Album Scope Selector ─────────────────────────────────────────────── -->
@@ -231,13 +234,14 @@ $content = <<<HTML
 </div>
 
 <script>
-(function () {
+document.addEventListener('DOMContentLoaded', function () {
   'use strict';
 
   // ── Shared constants ───────────────────────────────────────────────────────
-  const TOTAL    = {$total_images};
-  const ALBUM_ID = {$album_id};
-  const CSRF     = {$csrf_js};
+  const TOTAL     = {$total_images};
+  const ALBUM_ID  = {$album_id};
+  const CSRF      = {$csrf_js};
+  const AJAX_BASE = {$ajax_base_js};
 
   // ── Shared helpers ─────────────────────────────────────────────────────────
   function esc(val) {
@@ -279,7 +283,7 @@ $content = <<<HTML
     const \$delBtn   = document.getElementById('lum-delete-selected');
     const \$feedback = document.getElementById('lum-delete-feedback');
 
-    if (!\$start) return;
+    if (!\$start || !\$cancel) return;
 
     \$start.addEventListener('click', startScan);
 
@@ -296,6 +300,7 @@ $content = <<<HTML
       lastId       = 0;
       totalChecked = 0;
       missingCount = 0;
+      let fetchFailed = false;
 
       \$start.classList.add('d-none');
       \$cancel.classList.remove('d-none');
@@ -311,7 +316,7 @@ $content = <<<HTML
 
       while (!cancelled) {
         const data = await fetchChunk();
-        if (!data) break;
+        if (!data) { fetchFailed = true; break; }
 
         totalChecked += data.checked;
         lastId        = data.last_id;
@@ -324,13 +329,13 @@ $content = <<<HTML
         if (data.done) break;
       }
 
-      finishScan();
+      if (!fetchFailed) finishScan();
       scanning = false;
     }
 
     async function fetchChunk() {
       try {
-        const resp = await fetch('ajax_integrity.php', {
+        const resp = await fetch(AJAX_BASE + 'ajax_integrity.php', {
           method : 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body   : 'last_id='    + lastId
@@ -444,7 +449,7 @@ $content = <<<HTML
         const n   = ids.length;
 
         if (!confirm(
-          'Permanently remove ' + n + ' record' + (n !== 1 ? 's' : '') + ' from the database?\n\n'
+          'Permanently remove ' + n + ' record' + (n !== 1 ? 's' : '') + ' from the database?\\n\\n'
           + 'This only removes the database entries — no files on disk are touched.'
         )) return;
 
@@ -456,7 +461,7 @@ $content = <<<HTML
             return 'ids[]=' + encodeURIComponent(id);
           }).join('&') + '&csrf_token=' + encodeURIComponent(CSRF);
 
-          const resp = await fetch('ajax_integrity_delete.php', {
+          const resp = await fetch(AJAX_BASE + 'ajax_integrity_delete.php', {
             method : 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body   : body,
@@ -527,7 +532,7 @@ $content = <<<HTML
     const \$count    = document.getElementById('lum-dim-count');
     const \$summary  = document.getElementById('lum-dim-summary');
 
-    if (!\$start) return;
+    if (!\$start || !\$cancel) return;
 
     \$start.addEventListener('click', startTool);
 
@@ -554,10 +559,11 @@ $content = <<<HTML
       let totalUpdated = 0;
       let totalSkipped = 0;
       let allErrors    = [];
+      let fetchFailed  = false;
 
       while (!cancelled) {
         const data = await fetchChunk();
-        if (!data) break;
+        if (!data) { fetchFailed = true; break; }
 
         totalChecked += data.checked;
         totalUpdated += data.updated;
@@ -569,13 +575,13 @@ $content = <<<HTML
         if (data.done) break;
       }
 
-      finishTool(totalUpdated, totalSkipped, allErrors);
+      if (!fetchFailed) finishTool(totalUpdated, totalSkipped, allErrors);
       running = false;
     }
 
     async function fetchChunk() {
       try {
-        const resp = await fetch('ajax_dimensions.php', {
+        const resp = await fetch(AJAX_BASE + 'ajax_dimensions.php', {
           method : 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body   : 'last_id='    + lastId
@@ -650,7 +656,7 @@ $content = <<<HTML
     const \$count    = document.getElementById('lum-thn-count');
     const \$summary  = document.getElementById('lum-thn-summary');
 
-    if (!\$start || \$start.disabled) return;
+    if (!\$start || !\$cancel || \$start.disabled) return;
 
     \$start.addEventListener('click', startTool);
 
@@ -677,10 +683,11 @@ $content = <<<HTML
       let totalUpdated = 0;
       let totalSkipped = 0;
       let allErrors    = [];
+      let fetchFailed  = false;
 
       while (!cancelled) {
         const data = await fetchChunk();
-        if (!data) break;
+        if (!data) { fetchFailed = true; break; }
 
         totalChecked += data.checked;
         totalUpdated += data.updated;
@@ -692,13 +699,13 @@ $content = <<<HTML
         if (data.done) break;
       }
 
-      finishTool(totalUpdated, totalSkipped, allErrors);
+      if (!fetchFailed) finishTool(totalUpdated, totalSkipped, allErrors);
       running = false;
     }
 
     async function fetchChunk() {
       try {
-        const resp = await fetch('ajax_thumbs.php', {
+        const resp = await fetch(AJAX_BASE + 'ajax_thumbs.php', {
           method : 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body   : 'last_id='    + lastId
@@ -771,7 +778,7 @@ $content = <<<HTML
     bar.classList.add('progress-bar-striped', 'progress-bar-animated');
   }
 
-}());
+}); // end DOMContentLoaded
 </script>
 HTML;
 

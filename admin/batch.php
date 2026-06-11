@@ -32,7 +32,10 @@ if ($album_id > 0) {
 }
 
 $base = h(lumora_base_url() . 'admin/');
-$csrf = h(lumora_csrf_token());
+$csrf    = h(lumora_csrf_token());
+// json_encode produces a properly quoted, escaped JS string literal for the CSRF token.
+// This is the correct way to inject PHP values into JavaScript (consistent with maintenance.php).
+$csrf_js = json_encode(lumora_csrf_token());
 
 // ── Album selector ────────────────────────────────────────────────────────────
 $sel_opts = '<option value="">— Select an album —</option>';
@@ -107,7 +110,7 @@ $content = <<<HTML
   'use strict';
 
   var albumId = {$album_id};
-  var csrf    = '{$csrf}';
+  var csrf    = {$csrf_js};
   var total   = {$new_count};
   var chunkSz = 50;
 

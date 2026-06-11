@@ -1,20 +1,33 @@
 -- Lumora Gallery — Database Schema
--- Version: 2
+-- Version: 5
 -- Requires: MySQL 5.7+ / MariaDB 10.3+
 -- Charset: utf8mb4 / utf8mb4_unicode_ci
 --
 -- {PREFIX} is replaced by the installer with the configured table prefix (default: lum_).
 --
 -- Tables:
---   {PREFIX}config      — gallery-wide key/value settings
---   {PREFIX}users       — admin account (V1 single-user, expandable)
---   {PREFIX}categories  — nested category tree (parent_id = 0 for root)
---   {PREFIX}albums      — albums; each maps to a sub-folder of albums/
---   {PREFIX}images      — individual images with dimensions and view counter
---   {PREFIX}log         — activity log (used when log_mode = 'all'; DB version 2)
+--   {PREFIX}config           — gallery-wide key/value settings
+--   {PREFIX}users            — admin account (V1 single-user, expandable)
+--   {PREFIX}categories       — nested category tree (parent_id = 0 for root)
+--   {PREFIX}albums           — albums; each maps to a sub-folder of albums/
+--   {PREFIX}images           — individual images with dimensions and view counter
+--   {PREFIX}log              — activity log (used when log_mode = 'all'; DB version 2)
+--   {PREFIX}remember_tokens  — persistent remember-me split tokens (DB version 3)
+--   {PREFIX}online           — active visitor tracking for Who Is Online (DB version 5)
+--
+-- Migration from DB version 4:
+--   Run the CREATE TABLE statement for {PREFIX}online below (with your actual prefix).
+--
+-- Migration from DB version 3:
+--   ALTER TABLE `{PREFIX}categories`
+--     ADD COLUMN `thumb_image_id` int UNSIGNED NOT NULL DEFAULT 0
+--       COMMENT 'FK to images.id; 0 = auto-pick first album image';
+--
+-- Migration from DB version 2:
+--   Run the CREATE TABLE statement for {PREFIX}remember_tokens below (with your actual prefix).
 --
 -- Migration from DB version 1:
---   Run the CREATE TABLE statement for {PREFIX}log below (with your actual prefix).
+--   Run the CREATE TABLE statements for {PREFIX}log and {PREFIX}remember_tokens below.
 
 SET NAMES utf8mb4;
 
@@ -52,11 +65,12 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}users` (
 -- categories
 -- ──────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `{PREFIX}categories` (
-  `id`          int UNSIGNED  NOT NULL AUTO_INCREMENT,
-  `parent_id`   int UNSIGNED  NOT NULL DEFAULT 0,
-  `name`        varchar(255)  NOT NULL,
-  `description` text          NOT NULL,
-  `pos`         int           NOT NULL DEFAULT 0,
+  `id`             int UNSIGNED  NOT NULL AUTO_INCREMENT,
+  `parent_id`      int UNSIGNED  NOT NULL DEFAULT 0,
+  `name`           varchar(255)  NOT NULL,
+  `description`    text          NOT NULL,
+  `pos`            int           NOT NULL DEFAULT 0,
+  `thumb_image_id` int UNSIGNED  NOT NULL DEFAULT 0 COMMENT 'FK to images.id; 0 = auto-pick first album image',
   PRIMARY KEY (`id`),
   KEY `parent_id` (`parent_id`),
   KEY `pos`       (`pos`)
@@ -140,3 +154,45 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}log` (
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Activity log (used when log_mode = all)';
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- remember_tokens  (DB version 3)
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Split-token persistent "Remember Me" scheme.
+-- selector:         32-char hex (16 random bytes); stored plain; used for lookup.
+-- hashed_validator: 64-char hex; SHA-256 of the 64-char validator in the cookie.
+--                   Never stored in plain form — only the browser cookie holds it.
+-- expires_at:       When the token (and the browser cookie) expire.
+-- ──────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `{PREFIX}remember_tokens` (
+  `id`               bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`          int UNSIGNED    NOT NULL,
+  `selector`         varchar(32)     NOT NULL,
+  `hashed_validator` varchar(64)     NOT NULL,
+  `expires_at`       datetime        NOT NULL,
+  `created_at`       datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `selector`  (`selector`),
+  KEY `user_id`          (`user_id`),
+  KEY `expires_at`       (`expires_at`)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Persistent remember-me tokens (DB version 3)';
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- online  (DB version 5)
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Tracks active visitors for the "Who Is Online" feature.
+-- ip:          IPv4 or IPv6 address (up to 45 chars for IPv6).
+-- last_action: Updated on every public page load; stale rows are purged by
+--             lumora_track_visitor() after `who_is_online_duration` minutes.
+-- ──────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `{PREFIX}online` (
+  `ip`          varchar(45)  NOT NULL,
+  `last_action` datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`ip`)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Active visitor tracking for Who Is Online (DB version 5)';

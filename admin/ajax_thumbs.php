@@ -59,7 +59,7 @@ $limit    = lumora_int($_POST['limit']    ?? 20, 20, 1, 25);
 $album_id = lumora_int($_POST['album_id'] ?? 0, 0, 0);
 
 // Thumbnail generation is CPU-intensive; allow extra time per chunk.
-@set_time_limit(300);
+set_time_limit(300);
 
 // ── Query chunk via keyset pagination ─────────────────────────────────────────
 try {

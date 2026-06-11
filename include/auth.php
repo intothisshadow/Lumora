@@ -6,22 +6,40 @@ declare(strict_types=1);
  * Single-admin for V1; schema supports additional users/roles for future expansion.
  * Sessions are started by bootstrap.php before these functions are called.
  *
+ * Persistent "Remember Me" uses a split-token scheme:
+ *   - Cookie value:  selector (32 hex chars) + ':' + validator (64 hex chars)
+ *   - DB stores:     selector plain, SHA-256(validator) as hashed_validator
+ * Timing-safe comparison via hash_equals() prevents validator enumeration.
+ * Validator mismatch on a known selector is treated as a theft attempt and
+ * ALL tokens for the affected user are revoked immediately.
+ * Tokens are rotated on every successful auto-login.
+ * DB operations on {PREFIX}remember_tokens are wrapped in catch(\Throwable)
+ * so that pre-v3 installations (table absent) are unaffected.
+ *
  * @copyright Copyright (C) 2025 Ariane
  * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 if (!defined('LUMORA_ENTRY')) exit('Direct access denied.');
 
-define('LUMORA_SESSION_KEY', 'lumora_auth');
-define('LUMORA_SESSION_TTL', 7200); // seconds (2 hours idle timeout)
+define('LUMORA_SESSION_KEY',    'lumora_auth');
+define('LUMORA_SESSION_TTL',    7200);           // seconds – idle/age timeout (2 h)
+define('LUMORA_REMEMBER_COOKIE', 'lumora_remember');
+define('LUMORA_REMEMBER_DAYS',   30);            // persistent-cookie lifetime
 
 // ── Login / Logout ────────────────────────────────────────────────────────────
 
 /**
  * Attempt to authenticate a user.
+ *
+ * When $remember is true a persistent remember-me token is created and a
+ * 30-day cookie is set. Requires the {PREFIX}remember_tokens table (DB v3+);
+ * on older installs the cookie/DB write fails silently and the user still
+ * gets a normal session-only login.
+ *
  * Returns the user row on success, null on failure.
  */
-function lumora_login(string $username, string $password): ?array
+function lumora_login(string $username, string $password, bool $remember = false): ?array
 {
     $user = LumoraDB::fetchOne(
         'SELECT * FROM `{PREFIX}users` WHERE username = ?',
@@ -46,14 +64,31 @@ function lumora_login(string $username, string $password): ?array
     // Rotate session ID to prevent fixation.
     session_regenerate_id(true);
 
+    if ($remember) {
+        lumora_create_remember_token((int) $user['id']);
+    }
+
     return $user;
 }
 
 /**
  * Log out the current user.
+ *
+ * When $clear_remember is true (explicit user-initiated logout) the persistent
+ * cookie is cleared and all remember-me tokens for the user are revoked.
+ * Session-expiry calls within lumora_is_logged_in() pass false so the cookie
+ * survives and can auto-log the user back in on the next request.
  */
-function lumora_logout(): void
+function lumora_logout(bool $clear_remember = false): void
 {
+    if ($clear_remember) {
+        $user_id = (int) (($_SESSION[LUMORA_SESSION_KEY] ?? [])['user_id'] ?? 0);
+        if ($user_id > 0) {
+            lumora_clear_remember_tokens($user_id);
+        }
+        lumora_clear_remember_cookie();
+    }
+
     unset($_SESSION[LUMORA_SESSION_KEY]);
     session_regenerate_id(true);
 }
@@ -68,7 +103,9 @@ function lumora_is_logged_in(): bool
     if (!isset($_SESSION[LUMORA_SESSION_KEY])) return false;
     $s = $_SESSION[LUMORA_SESSION_KEY];
     if ((time() - ($s['login_at'] ?? 0)) > LUMORA_SESSION_TTL) {
-        lumora_logout();
+        // Session expired; keep the remember-me cookie so bootstrap can
+        // transparently re-authenticate via lumora_check_remember_cookie().
+        lumora_logout(false);
         return false;
     }
     return true;
@@ -137,6 +174,169 @@ function lumora_csrf_validate(): void
     ) {
         http_response_code(403);
         exit('CSRF validation failed.');
+    }
+}
+
+// ── Remember Me ───────────────────────────────────────────────────────────────
+
+/**
+ * Create a new remember-me token for $user_id and set the persistent cookie.
+ *
+ * Split-token scheme:
+ *   selector  — random 16 bytes as 32-char hex; stored plain; used for DB lookup.
+ *   validator — random 32 bytes as 64-char hex; stored as SHA-256 in DB; full
+ *               value travels in the cookie only.
+ *
+ * Fails silently on DB error so pre-v3 installs (table absent) are unaffected.
+ */
+function lumora_create_remember_token(int $user_id): void
+{
+    $selector  = bin2hex(random_bytes(16));
+    $validator = bin2hex(random_bytes(32));
+    $expires   = date('Y-m-d H:i:s', time() + (LUMORA_REMEMBER_DAYS * 86400));
+
+    try {
+        LumoraDB::insert('remember_tokens', [
+            'user_id'          => $user_id,
+            'selector'         => $selector,
+            'hashed_validator' => hash('sha256', $validator),
+            'expires_at'       => $expires,
+        ]);
+    } catch (\Throwable) {
+        // {PREFIX}remember_tokens absent on pre-v3 installs; fail silently.
+        return;
+    }
+
+    setcookie(LUMORA_REMEMBER_COOKIE, $selector . ':' . $validator, [
+        'expires'  => time() + (LUMORA_REMEMBER_DAYS * 86400),
+        'path'     => '/',
+        'secure'   => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
+/**
+ * Validate the remember-me cookie and, if valid, rebuild the admin session.
+ *
+ * Token is rotated on every successful call (old token deleted, new one issued)
+ * to limit the exposure window if a token is ever compromised.
+ *
+ * Returns true when the session has been populated, false otherwise.
+ * Silently ignores DB errors so pre-v3 installs are unaffected.
+ */
+function lumora_check_remember_cookie(): bool
+{
+    $cookie = $_COOKIE[LUMORA_REMEMBER_COOKIE] ?? '';
+    if ($cookie === '') return false;
+
+    // Cookie must be exactly "selector:validator".
+    $parts = explode(':', $cookie, 2);
+    if (count($parts) !== 2) {
+        lumora_clear_remember_cookie();
+        return false;
+    }
+
+    [$selector, $validator] = $parts;
+
+    // Validate format before hitting the DB.
+    if (
+        !preg_match('/^[0-9a-f]{32}$/', $selector) ||
+        !preg_match('/^[0-9a-f]{64}$/', $validator)
+    ) {
+        lumora_clear_remember_cookie();
+        return false;
+    }
+
+    // Fetch token row by selector.
+    try {
+        $token = LumoraDB::fetchOne(
+            'SELECT * FROM `{PREFIX}remember_tokens` WHERE selector = ?',
+            [$selector]
+        );
+    } catch (\Throwable) {
+        return false;
+    }
+
+    if (!$token) {
+        lumora_clear_remember_cookie();
+        return false;
+    }
+
+    // Check expiry.
+    if (strtotime((string) $token['expires_at']) < time()) {
+        try { LumoraDB::delete('remember_tokens', 'selector = ?', [$selector]); } catch (\Throwable) {}
+        lumora_clear_remember_cookie();
+        return false;
+    }
+
+    // Validate the hashed validator using constant-time comparison.
+    $expected_hash = hash('sha256', $validator);
+    if (!hash_equals((string) $token['hashed_validator'], $expected_hash)) {
+        // Selector matched but validator did not — possible token theft.
+        // Revoke every token for this user immediately.
+        try { LumoraDB::delete('remember_tokens', 'user_id = ?', [(int) $token['user_id']]); } catch (\Throwable) {}
+        lumora_clear_remember_cookie();
+        return false;
+    }
+
+    // Load the user record.
+    $user = LumoraDB::fetchOne(
+        'SELECT * FROM `{PREFIX}users` WHERE id = ?',
+        [(int) $token['user_id']]
+    );
+
+    if (!$user || $user['role'] !== 'admin') {
+        try { LumoraDB::delete('remember_tokens', 'selector = ?', [$selector]); } catch (\Throwable) {}
+        lumora_clear_remember_cookie();
+        return false;
+    }
+
+    // Rotate: delete the consumed token and issue a fresh one.
+    try { LumoraDB::delete('remember_tokens', 'selector = ?', [$selector]); } catch (\Throwable) {}
+    lumora_create_remember_token((int) $user['id']);
+
+    // Update last-login and rebuild the session.
+    LumoraDB::query('UPDATE `{PREFIX}users` SET last_login = NOW() WHERE id = ?', [$user['id']]);
+
+    $_SESSION[LUMORA_SESSION_KEY] = [
+        'user_id'  => (int) $user['id'],
+        'username' => $user['username'],
+        'role'     => $user['role'],
+        'login_at' => time(),
+    ];
+
+    session_regenerate_id(true);
+
+    return true;
+}
+
+/**
+ * Expire the remember-me cookie immediately in the browser.
+ */
+function lumora_clear_remember_cookie(): void
+{
+    if (isset($_COOKIE[LUMORA_REMEMBER_COOKIE])) {
+        setcookie(LUMORA_REMEMBER_COOKIE, '', [
+            'expires'  => time() - 3600,
+            'path'     => '/',
+            'secure'   => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+    }
+}
+
+/**
+ * Delete all remember-me tokens for $user_id from the database.
+ * Fails silently on pre-v3 installs where the table does not yet exist.
+ */
+function lumora_clear_remember_tokens(int $user_id): void
+{
+    try {
+        LumoraDB::delete('remember_tokens', 'user_id = ?', [$user_id]);
+    } catch (\Throwable) {
+        // {PREFIX}remember_tokens absent on pre-v3 installs; fail silently.
     }
 }
 

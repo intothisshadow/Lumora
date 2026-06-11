@@ -169,7 +169,7 @@ function ins_check_requirements(): array
     // albums/ directory
     $dir = LUMORA_ALBUMS_PATH;
     if (!is_dir($dir)) {
-        @mkdir($dir, 0755, true);
+        mkdir($dir, 0755, true);
     }
     $ok = is_dir($dir) && is_writable($dir);
     $checks[] = ['label' => 'albums/ directory writable', 'ok' => $ok ? 'ok' : 'fail',
@@ -190,6 +190,38 @@ function ins_requirements_passed(array $checks): bool
         if ($c['ok'] === 'fail') return false;
     }
     return true;
+}
+
+/**
+ * Attempt to delete the installer directory and all its contents.
+ * Called automatically at the end of a successful installation.
+ *
+ * Deletes all files inside first, then removes the (now empty) directory.
+ * On Unix/Linux, deleting the currently-running PHP file from within that same
+ * script is safe because the process already holds an open file descriptor.
+ *
+ * @return bool True if the directory was fully removed; false otherwise.
+ */
+function ins_delete_installer(): bool
+{
+    $dir = LUMORA_ROOT . 'install';
+    if (!is_dir($dir)) {
+        return true; // already absent
+    }
+
+    // Delete every file inside (install/ contains no subdirectories).
+    $files = glob($dir . DIRECTORY_SEPARATOR . '*');
+    if ($files === false) {
+        return false;
+    }
+    foreach ($files as $file) {
+        if (is_file($file) && !unlink($file)) {
+            return false;
+        }
+    }
+
+    // Remove the now-empty directory.
+    return rmdir($dir);
 }
 
 // ── Session ───────────────────────────────────────────────────────────────────
@@ -433,9 +465,12 @@ HTML;
         'max_upload_size_mb'  => '0',
         'max_image_width'     => '0',
         'max_image_height'    => '0',
-        'count_album_views'   => '1',
-        'log_mode'            => 'off',
-        'gallery_offline'     => '0',
+        'count_album_views'    => '1',
+        'log_mode'             => 'off',
+        'gallery_offline'      => '0',
+        'latest_albums_count'      => '5',
+        'who_is_online_duration'   => '5',
+        'show_powered_by'          => '1',
     ];
 
     try {
@@ -506,16 +541,28 @@ HTML;
 
     // Ensure albums/ directory exists.
     if (!is_dir(LUMORA_ALBUMS_PATH)) {
-        @mkdir(LUMORA_ALBUMS_PATH, 0755, true);
+        mkdir(LUMORA_ALBUMS_PATH, 0755, true);
     }
 
     // Clean up installer session data.
     unset($_SESSION['ins_db'], $_SESSION['ins_base_url'], $_SESSION['ins_csrf']);
 
+    // Attempt to auto-delete the installer directory.
+    // On most Unix/Linux hosts this succeeds; on Windows or with restrictive
+    // permissions it may fail — a persistent warning will appear in the admin
+    // panel until the directory is gone (see admin_helpers.php).
+    $install_deleted = ins_delete_installer();
+
     // Done!
     $admin_url   = ins_h(rtrim($base_url, '/') . '/admin/');
     $gallery_url = ins_h($base_url);
     $a_user_h    = ins_h($admin_user);
+
+    // Computed before the heredoc so PHP can interpolate {$install_status_html}.
+    $install_status_html = $install_deleted
+        ? '<div class="alert alert-success py-2 small mt-2">&#10003; The <code>install/</code> directory was automatically removed.</div>'
+        : '<div class="alert alert-warning py-2 small mt-2">&#9888; The <code>install/</code> directory could not be removed automatically. '
+          . 'Please delete it manually via FTP or your hosting control panel.</div>';
 
     $body = <<<HTML
 <div class="alert alert-success">
@@ -528,8 +575,8 @@ HTML;
   <li>Go to <strong>Admin → Categories</strong> to create your first category</li>
   <li>Go to <strong>Admin → Albums</strong> to create albums</li>
   <li>Upload images via FTP to <code>albums/{folder}/</code> and use <strong>Batch Add</strong></li>
-  <li>For security, consider deleting or renaming the <code>install/</code> directory</li>
 </ol>
+{$install_status_html}
 <div class="d-flex gap-2">
   <a href="{$admin_url}" class="btn btn-primary">Go to Admin Panel</a>
   <a href="{$gallery_url}" class="btn btn-outline-secondary">View Gallery</a>

@@ -120,16 +120,16 @@ function lumora_thumb_gd(
     int    $max_h,
     int    $quality = 85
 ): bool {
-    $info = @getimagesize($source);
+    $info = getimagesize($source);
     if (!$info) return false;
 
     [$src_w, $src_h, $type] = $info;
 
     $src = match ($type) {
-        IMAGETYPE_JPEG => @imagecreatefromjpeg($source),
-        IMAGETYPE_PNG  => @imagecreatefrompng($source),
-        IMAGETYPE_GIF  => @imagecreatefromgif($source),
-        IMAGETYPE_WEBP => function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($source) : false,
+        IMAGETYPE_JPEG => imagecreatefromjpeg($source),
+        IMAGETYPE_PNG  => imagecreatefrompng($source),
+        IMAGETYPE_GIF  => imagecreatefromgif($source),
+        IMAGETYPE_WEBP => function_exists('imagecreatefromwebp') ? imagecreatefromwebp($source) : false,
         default        => false,
     };
     if (!$src) return false;
@@ -206,20 +206,20 @@ function lumora_resize_original(string $path, int $max_w, int $max_h): bool
     $ok = lumora_generate_thumb($path, $tmp, $limit_w, $limit_h, false, 92);
 
     if (!$ok || !file_exists($tmp)) {
-        if (file_exists($tmp)) @unlink($tmp);
+        if (file_exists($tmp)) unlink($tmp);
         error_log('Lumora: lumora_resize_original failed to generate resized version of ' . $path);
         return false;
     }
 
     // Try atomic rename first (fast; works when src and dest are on the same fs).
     // Fall back to copy+unlink for cross-filesystem moves (e.g. /tmp on tmpfs).
-    if (!@rename($tmp, $path)) {
+    if (!rename($tmp, $path)) {
         if (!copy($tmp, $path)) {
-            @unlink($tmp);
+            unlink($tmp);
             error_log('Lumora: Could not move resized original over ' . $path);
             return false;
         }
-        @unlink($tmp);
+        unlink($tmp);
     }
 
     return true;
@@ -235,8 +235,9 @@ function lumora_resize_original(string $path, int $max_w, int $max_h): bool
  */
 function lumora_get_image_dimensions(string $filepath): array
 {
-    $info = @getimagesize($filepath);
-    return $info ? [(int) $info[0], (int) $info[1]] : [0, 0];
+    if (!is_file($filepath)) return [0, 0];
+    $info = getimagesize($filepath);
+    return $info !== false ? [(int) $info[0], (int) $info[1]] : [0, 0];
 }
 
 /**
@@ -244,7 +245,8 @@ function lumora_get_image_dimensions(string $filepath): array
  */
 function lumora_get_filesize(string $filepath): int
 {
-    $size = @filesize($filepath);
+    if (!is_file($filepath)) return 0;
+    $size = filesize($filepath);
     return $size !== false ? (int) $size : 0;
 }
 

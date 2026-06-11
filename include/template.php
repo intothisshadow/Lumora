@@ -9,7 +9,7 @@ declare(strict_types=1);
  * All HTML-generation helper functions live here:
  *   lumora_render_thumbgrid(), lumora_render_catgrid(), lumora_render_breadcrumb(),
  *   lumora_render_pagination(), lumora_render_sort_controls(),
- *   lumora_render_stats(), lumora_render_lightbox_js(),
+ *   lumora_render_stats(), lumora_render_who_is_online(), lumora_render_lightbox_js(),
  *   lumora_custom_header(), lumora_custom_footer(), lumora_render_nav()
  *
  * @copyright Copyright (C) 2025 Ariane
@@ -34,6 +34,7 @@ if (!defined('LUMORA_ENTRY')) exit('Direct access denied.');
  *   {ADMIN_LINK}          - admin panel link (if admin is logged in)
  *   {CUSTOM_HEADER}       - optional custom header HTML
  *   {CUSTOM_FOOTER}       - optional custom footer HTML
+ *   {POWERED_BY}          - Powered By credit HTML (empty when show_powered_by = 0)
  *   {CONTENT}             - main page content
  *   {CHARSET}             - always "utf-8"
  *
@@ -88,6 +89,7 @@ function lumora_render_page(string $content, array $extra = []): void
             : '',
         '{CUSTOM_HEADER}'       => lumora_custom_header(),
         '{CUSTOM_FOOTER}'       => lumora_custom_footer(),
+        '{POWERED_BY}'          => lumora_render_powered_by(),
         '{CONTENT}'             => $content,
         '{PAGE_TITLE}'          => '',  // caller override expected
     ];
@@ -118,20 +120,47 @@ HTML;
 
 function lumora_custom_header(): string
 {
-    $path = lumora_config('custom_header_path', '');
-    if ($path !== '' && file_exists(LUMORA_ROOT . ltrim($path, '/\\'))) {
-        return file_get_contents(LUMORA_ROOT . ltrim($path, '/\\'));
-    }
-    return '';
+    return lumora_load_custom_file((string) lumora_config('custom_header_path', ''));
 }
 
 function lumora_custom_footer(): string
 {
-    $path = lumora_config('custom_footer_path', '');
-    if ($path !== '' && file_exists(LUMORA_ROOT . ltrim($path, '/\\'))) {
-        return file_get_contents(LUMORA_ROOT . ltrim($path, '/\\'));
+    return lumora_load_custom_file((string) lumora_config('custom_footer_path', ''));
+}
+
+function lumora_render_powered_by(): string
+{
+    if (lumora_config('show_powered_by', '1') !== '1') {
+        return '';
     }
-    return '';
+    return '<small class="text-muted">Powered by '
+        . '<a href="https://code.unloved-heart.net/lumora" rel="noopener">Lumora Gallery</a> '
+        . LUMORA_VERSION
+        . '</small>';
+}
+
+/**
+ * Load a custom HTML file from a config-supplied relative path.
+ *
+ * Uses realpath() to verify the resolved path is strictly within the gallery
+ * root, preventing directory traversal attacks (e.g. "../../etc/passwd").
+ *
+ * @param string $path Relative path from LUMORA_ROOT (admin-supplied via config).
+ */
+function lumora_load_custom_file(string $path): string
+{
+    if ($path === '') return '';
+
+    $root     = realpath(LUMORA_ROOT);
+    $resolved = realpath(LUMORA_ROOT . ltrim($path, '/\\'));
+
+    if ($root === false || $resolved === false) return '';
+
+    // The resolved path must be strictly inside the gallery root directory.
+    if (!str_starts_with($resolved, $root . DIRECTORY_SEPARATOR)) return '';
+
+    $content = file_get_contents($resolved);
+    return $content !== false ? $content : '';
 }
 
 // ── Breadcrumb ────────────────────────────────────────────────────────────────
@@ -205,6 +234,45 @@ function lumora_render_stats(array $stats): string
       <div class="lum-stat-lbl">Total Views</div>
     </div>
   </div>
+</div>
+HTML;
+}
+
+/**
+ * Render the "Who Is Online" strip for the home page bottom.
+ *
+ * Calls get_online_stats() to fetch the live count and all-time record, then
+ * renders a compact single-row strip below the stats boxes.
+ * Returns an empty string when the {PREFIX}online table is absent (pre-v5
+ * installs) so the home page degrades gracefully without errors.
+ */
+function lumora_render_who_is_online(): string
+{
+    $stats    = get_online_stats();
+    $count    = (int) $stats['online'];
+    $record   = (int) $stats['record_count'];
+    $rec_date = (string) $stats['record_date'];
+    $duration = max(1, (int) lumora_config('who_is_online_duration', '5'));
+
+    $label = $count === 1 ? 'visitor' : 'visitors';
+    $c     = number_format($count);
+    $r     = number_format($record);
+    $d_str = $duration === 1 ? '1 min' : $duration . ' min';
+
+    $rec_html = '';
+    if ($record > 0 && $rec_date !== '') {
+        $rec_html = ' &mdash; record: <strong>' . $r . '</strong> on '
+            . h(date('j M Y', (int) strtotime($rec_date)));
+    } elseif ($record > 0) {
+        $rec_html = ' &mdash; record: <strong>' . $r . '</strong>';
+    }
+
+    return <<<HTML
+<div class="lum-who-is-online text-center text-muted small mb-4">
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" class="me-1" style="vertical-align:-1px" aria-hidden="true">
+    <path d="M7 14s-1 0-1-1 1-4 5-4 5 3 5 4-1 1-1 1zm4-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6m-5.784 6A2.24 2.24 0 0 1 5 13c0-1.355.68-2.75 1.936-3.72A6.3 6.3 0 0 0 5 9c-4 0-5 3-5 4s1 1 1 1zM4.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5"/>
+  </svg>
+  <strong>{$c}</strong> {$label} online (last {$d_str}{$rec_html})
 </div>
 HTML;
 }
@@ -405,8 +473,30 @@ function lumora_render_item_thumb(array $item, string $type, string $url): strin
             );
             if ($row) $thumb_url = image_thumb_url($row);
         }
+    } elseif ($type === 'category') {
+        // Use an explicitly configured cover image if set.
+        if (!empty($item['thumb_image_id'])) {
+            $row = LumoraDB::fetchOne(
+                'SELECT i.filename, a.folder FROM `{PREFIX}images` i
+                 JOIN `{PREFIX}albums` a ON a.id = i.album_id
+                 WHERE i.id = ? AND i.approved = 1',
+                [(int) $item['thumb_image_id']]
+            );
+            if ($row) $thumb_url = image_thumb_url($row);
+        }
+
+        // Fall back to the first image in any public album in this category.
+        if (!$thumb_url) {
+            $row = LumoraDB::fetchOne(
+                'SELECT i.filename, a.folder FROM `{PREFIX}images` i
+                 JOIN `{PREFIX}albums` a ON a.id = i.album_id
+                 WHERE a.category_id = ? AND a.visibility = 0 AND i.approved = 1
+                 ORDER BY i.pos ASC, i.id ASC LIMIT 1',
+                [(int) $item['id']]
+            );
+            if ($row) $thumb_url = image_thumb_url($row);
+        }
     }
-    // For categories we could recurse into albums, but a placeholder is fine for V1.
 
     if ($thumb_url) {
         return '<a href="' . $url . '">'

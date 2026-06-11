@@ -73,7 +73,7 @@ $processed = 0;
 $errors    = [];
 
 // Give shared-hosts time for large thumbnails (most allow at least 60 s).
-@set_time_limit(180);
+set_time_limit(180);
 
 foreach ($chunk as $filename) {
     $result = lumora_batch_add_image($filename, $album['folder'], $album_id);

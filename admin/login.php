@@ -22,7 +22,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     lumora_csrf_validate();
     $user = lumora_login(
         trim($_POST['username'] ?? ''),
-        $_POST['password'] ?? ''
+        $_POST['password'] ?? '',
+        isset($_POST['remember_me'])
     );
     if ($user && $user['role'] === 'admin') {
         $dest = ($redirect && str_starts_with($redirect, '/')) ? $redirect : lumora_base_url() . 'admin/dashboard.php';
@@ -59,7 +60,7 @@ echo <<<HTML
 <body>
 <div class="login-card card shadow-sm">
   <div class="login-header">
-    <h1>⚡ Lumora Admin</h1>
+    <h1>⚡ Lumora Gallery Admin</h1>
     <small class="opacity-75">{$gal_name}</small>
   </div>
   <div class="card-body p-4">
@@ -71,9 +72,13 @@ echo <<<HTML
         <label class="form-label fw-semibold">Username</label>
         <input type="text" name="username" class="form-control" autofocus autocomplete="username" required>
       </div>
-      <div class="mb-4">
+      <div class="mb-3">
         <label class="form-label fw-semibold">Password</label>
         <input type="password" name="password" class="form-control" autocomplete="current-password" required>
+      </div>
+      <div class="mb-4 d-flex align-items-center gap-2">
+        <input type="checkbox" class="form-check-input mt-0" id="lum-remember" name="remember_me" value="1">
+        <label class="form-check-label text-muted small" for="lum-remember">Stay logged in for 30 days</label>
       </div>
       <button type="submit" class="btn btn-primary w-100">Log In</button>
     </form>

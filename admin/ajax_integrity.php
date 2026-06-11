@@ -59,7 +59,7 @@ $limit    = lumora_int($_POST['limit']    ?? 500, 500, 1, 1000);
 $album_id = lumora_int($_POST['album_id'] ?? 0, 0, 0);
 
 // Give ourselves enough time for large chunks.
-@set_time_limit(120);
+set_time_limit(120);
 
 // ── Query chunk via keyset pagination ─────────────────────────────────────────
 // LEFT JOIN (all albums): catches image records whose album row has been deleted

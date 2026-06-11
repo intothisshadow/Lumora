@@ -4,6 +4,416 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — 2026-06-11
+
+### Changed
+- **Powered By credit moved from themes to core template system**
+  (`themes/default/template.html`, `include/template.php`, `admin/config.php`,
+  `install/index.php`):
+  The Powered By credit is now rendered by the core and injected via the
+  `{POWERED_BY}` template token, so future themes receive it automatically
+  without duplicating any markup.
+  - `themes/default/template.html` — hardcoded `<small>Powered by …</small>`
+    footer markup replaced with the `{POWERED_BY}` token. The footer element
+    itself remains in the theme so designers retain full control over placement.
+  - `lumora_render_powered_by()` added to `include/template.php` — returns the
+    credit HTML (or an empty string when disabled); reads
+    `lumora_config('show_powered_by', '1')`. The token is populated in
+    `lumora_render_page()` alongside all other standard tokens.
+  - `show_powered_by` config key (default `1`) added to Admin → Configuration
+    under the **Appearance** section as a toggle switch labelled **Show Powered
+    By Credit**. Included in the save whitelist, `$bool_keys`, `$cfg` read,
+    and config import `$safe_keys`.
+  - `show_powered_by` seeded as `'1'` in the installer's `$config_defaults` for
+    new installations.
+
+---
+## [Unreleased] — 2026-06-11
+
+### Added
+- **Image Management** (`admin/images.php`, `admin/ajax_image_delete.php`,
+  `admin/ajax_image_move.php`, `admin/ajax_image_rethumb.php`):
+  New dedicated admin page for managing images within an album.
+  - **`admin/images.php`** — paginated image grid (24/page) with per-image
+    actions and bulk operations. Album selector dropdown. Edit form supports
+    updating title, sort position, and visibility (approved flag), plus optional
+    file replacement via multipart upload (validates type, size, and image
+    integrity; regenerates thumbnail and updates dimensions/filesize in DB).
+    Single-image delete removes original + thumbnail files and DB record, and
+    resets any album/category cover references (`thumb_image_id` → 0 auto-pick).
+  - **`admin/ajax_image_delete.php`** — AJAX bulk delete (up to 500 images per
+    call). Cleans up files on disk and resets album/category cover references.
+  - **`admin/ajax_image_move.php`** — AJAX bulk move to another album (up to
+    500 images per call). Moves original and thumbnail files (rename with
+    copy+unlink cross-filesystem fallback); refuses to overwrite existing
+    filenames in the target folder; resets source album cover reference when
+    the moved image was the cover.
+  - **`admin/ajax_image_rethumb.php`** — AJAX single-image thumbnail
+    regeneration using current `thumb_width`/`thumb_height`/`thumb_quality`
+    config values.
+  - **`admin/includes/admin_helpers.php`** — 📸 **Images** nav item added
+    between Albums and Configuration.
+  - **`admin/albums.php`** — 📸 **Manage Images** button added to each album
+    row in the Albums list, linking to `images.php?album=ID`.
+
+---
+
+## [Unreleased] — 2026-06-11
+
+### Added
+- **Front Page — Who Is Online** (`index.php`, `include/functions.php`,
+  `include/template.php`, `install/schema.sql`):
+  Active visitor tracking inspired by Coppermine's online-stats module.
+  - `{PREFIX}online` table (DB version 5) — one row per distinct IP address;
+    `last_action` column is updated on every public page load; stale rows are
+    purged automatically after `who_is_online_duration` minutes.
+  - `lumora_track_visitor()` in `include/functions.php` — records/refreshes
+    the current visitor's IP. Called from `index.php` and `album.php` on every
+    request. Wraps all DB work in `catch(\Throwable)` so pre-v5 installs without
+    the table are completely unaffected.
+  - `get_online_stats()` in `include/functions.php` — returns current online
+    count and the all-time record (`online_record_count` / `online_record_date`
+    config keys). Automatically updates the record when the current count exceeds
+    it. Degrades gracefully to `['online' => 0, …]` when the table is absent.
+  - `lumora_render_who_is_online()` in `include/template.php` — renders a
+    compact strip at the bottom of the home page: visitor count, configurable
+    window, and the all-time record with date.
+  - `who_is_online_duration` config key (default `5`, range 1–60 minutes) —
+    added to Admin → Configuration (Gallery Behavior section), save whitelist,
+    `match` sanitisation branch, and the config import `$safe_keys` list.
+    Also added to the installer's `$config_defaults` so fresh installs receive
+    the key automatically.
+- **Front Page — Statistics boxes moved to bottom** (`index.php`):
+  The four stat boxes (Categories, Albums, Images, Total Views) now render
+  below Latest Additions rather than above content sections. A `<hr>` separator
+  visually divides the stats from the thumbnail grid.
+- **Front Page — Recently Updated Albums above Categories** (`index.php`,
+  `include/functions.php`):
+  The home page now shows a "Recently Updated" card grid as the first section,
+  above the root category grid. Albums are ordered by the newest approved image's
+  `added_at` timestamp; albums with no approved images are excluded.
+  `get_latest_updated_albums(int $limit)` in `include/functions.php` handles
+  the query. The section is hidden when `latest_albums_count = 0`.
+
+### Database migration (existing installs — DB version 4 → 5)
+
+Run the following SQL once (replace `lum_` with your actual prefix):
+
+```sql
+CREATE TABLE IF NOT EXISTS `lum_online` (
+  `ip`          varchar(45)  NOT NULL,
+  `last_action` datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP
+                             ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`ip`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+Fresh installations created from `install/schema.sql` receive the table
+automatically. Existing installs that skip this migration will see 0 visitors
+online (all tracking calls fail silently) without any other errors.
+
+---
+
+### Added
+- **Category thumbnail support** (`include/template.php`, `admin/categories.php`,
+  `install/schema.sql`): Categories now display cover thumbnails on the public gallery,
+  matching the existing behaviour for albums.
+  - `{PREFIX}categories` gains a `thumb_image_id` column (DB version 4). When set to a
+    non-zero image ID the specified image is used as the category cover. When 0 (default)
+    the system auto-picks the first approved image from any public album in that category,
+    so categories that contain images get a meaningful cover without any admin action.
+  - `lumora_render_item_thumb()` in `include/template.php` gains an `elseif` branch for
+    `$type === 'category'`: checks `thumb_image_id` first, then falls back to the
+    auto-pick SQL query. Pre-migration installs (column absent) degrade gracefully —
+    `!empty($item['thumb_image_id'])` evaluates to false when the key is missing, so
+    the auto-pick branch still runs and categories show a thumbnail wherever one is
+    available. The old TODO comment `"a placeholder is fine for V1"` is removed.
+  - `admin/categories.php` edit form gains a **Cover Image** number field (Image ID,
+    0 = auto). Submitted values are validated against the `{PREFIX}images` table
+    (approved = 1); an invalid ID is rejected with a warning and silently reset to 0.
+    `thumb_image_id` is included in both the `INSERT` and `UPDATE` DB calls.
+
+### Changed
+- **Album delete — empty folder removal** (`admin/albums.php`): Deleting an album now
+  attempts to remove its physical directory when it is empty.
+  - The folder path is fetched before the DB rows are deleted.
+  - After the DB deletion, `scandir()` is used to check whether the directory
+    contains only `.` and `..`. If empty, `rmdir()` is called.
+  - The flash message reflects the outcome: folder removed, folder non-empty and kept,
+    folder not found on disk, or removal failed (with a prompt to use FTP).
+  - The delete-confirm dialog wording is updated to describe the new behaviour.
+  - Non-empty folders (containing images) are never touched.
+
+### Database migration (existing installs — DB version 3 → 4)
+
+Run the following SQL once (replace `lum_` with your actual prefix if different):
+
+```sql
+ALTER TABLE `lum_categories`
+  ADD COLUMN `thumb_image_id` int UNSIGNED NOT NULL DEFAULT 0
+    COMMENT 'FK to images.id; 0 = auto-pick first album image';
+```
+
+Fresh installations created from `install/schema.sql` receive the column automatically.
+Existing installs that skip this migration will see the category auto-pick thumbnail
+behaviour (no explicit cover set) without errors.
+
+---
+### Security
+- **Path traversal protection for custom header/footer files** (`include/template.php`):
+  `lumora_custom_header()` and `lumora_custom_footer()` now use `realpath()` to verify
+  that the configured file path resolves strictly within `LUMORA_ROOT` before reading.
+  A path like `../../etc/passwd` in the config is rejected outright. Extracted into a
+  new shared helper `lumora_load_custom_file()`.
+- **Safer AJAX base URL in maintenance page** (`admin/maintenance.php`):
+  The JavaScript `AJAX_BASE` constant now uses `lumora_base_url()` (from DB config)
+  instead of reconstructing the URL from `$_SERVER['HTTP_HOST']`, eliminating a
+  theoretical HTTP Host header injection vector on certain reverse-proxy setups.
+
+### Fixed
+- **Removed all `@` error-suppression operators** in compliance with PHP development
+  standards (`CLAUDE.md` §Error Handling — "Never suppress errors with `@` operators"):
+  - `admin/ajax_batch.php`, `admin/ajax_dimensions.php`, `admin/ajax_integrity.php`,
+    `admin/ajax_thumbs.php`: `@set_time_limit()` → `set_time_limit()`.
+  - `admin/albums.php`: `@mkdir()` → `mkdir()`.
+  - `install/index.php`: two `@mkdir()` → `mkdir()` (requirements check and
+    albums-directory creation).
+  - `include/thumb.php`: `@getimagesize()`, `@imagecreatefromjpeg/png/gif/webp()`,
+    `@unlink()`, `@rename()`, `@filesize()` operators removed. `is_file()` pre-checks
+    added to `lumora_get_image_dimensions()` and `lumora_get_filesize()` so the common
+    "file not found" case is handled without emitting a warning. Warnings for corrupt
+    or unreadable image files are now correctly forwarded to the PHP error log rather
+    than silently swallowed.
+- **HTML/JS injection in delete-confirm dialogs** (`admin/categories.php`,
+  `admin/albums.php`): Replaced `addslashes()` + inline `onsubmit="return confirm('...')"` 
+  with a `data-confirm` HTML attribute populated via `h()` and read by
+  `this.dataset.confirm` in the event handler. A category or album name containing
+  `"`, `>`, or a newline could previously break out of the HTML attribute or terminate
+  the JS string literal.
+
+### Added
+- **Authentication — "Stay logged in" / "Remember me" feature**:
+  Admins can now opt into a 30-day persistent session by ticking the **Stay logged
+  in for 30 days** checkbox on the login form. The feature uses a secure split-token
+  scheme (Charles Miller / Barry Jaspan pattern):
+  - A `selector` (32-char hex) is stored plain in the DB and sent in the cookie for
+    fast lookup.
+  - A `validator` (64-char hex) travels in the cookie only; the DB stores
+    `SHA-256(validator)` so a DB compromise alone cannot forge a login.
+  - Tokens are rotated on every successful auto-login to limit the exposure window.
+  - If the selector matches but the validator does not, all tokens for the affected
+    user are revoked immediately (theft-detection response).
+  - Explicit logout (Admin → Log Out) clears all persistent tokens for the user and
+    expires the cookie. Session-expiry during active browsing does **not** clear the
+    cookie; `bootstrap.php` transparently re-establishes the session on the next
+    request.
+  - New constants in `include/auth.php`: `LUMORA_REMEMBER_COOKIE` (`lumora_remember`)
+    and `LUMORA_REMEMBER_DAYS` (`30`).
+  - New functions: `lumora_create_remember_token()`, `lumora_check_remember_cookie()`,
+    `lumora_clear_remember_cookie()`, `lumora_clear_remember_tokens()`.
+  - `lumora_login()` gains an optional `bool $remember = false` parameter.
+  - `lumora_logout()` gains an optional `bool $clear_remember = false` parameter;
+    all existing call sites without the argument are unaffected.
+  - `include/bootstrap.php` — step 11a added: calls `lumora_check_remember_cookie()`
+    after session start when no active session is found.
+  - `admin/login.php` — "Stay logged in for 30 days" checkbox added below the
+    password field.
+  - `admin/logout.php` — passes `true` to `lumora_logout()` so tokens are revoked
+    on explicit logout.
+  - All DB operations on `{PREFIX}remember_tokens` are wrapped in
+    `catch(\Throwable)` so installations that have not yet run the migration are
+    fully unaffected (cookie silently not set; no auto-login attempted).
+
+### Database migration (existing installs — DB version 2 → 3)
+
+Run the following SQL once on existing installations (replace `lum_` with your
+actual table prefix if different):
+
+```sql
+CREATE TABLE IF NOT EXISTS `lum_remember_tokens` (
+  `id`               bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`          int UNSIGNED    NOT NULL,
+  `selector`         varchar(32)     NOT NULL,
+  `hashed_validator` varchar(64)     NOT NULL,
+  `expires_at`       datetime        NOT NULL,
+  `created_at`       datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `selector`  (`selector`),
+  KEY `user_id`          (`user_id`),
+  KEY `expires_at`       (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+Fresh installations created from `install/schema.sql` receive the table automatically.
+
+---
+
+## [Unreleased] — 2026-06-11
+
+### Fixed
+- **`admin/maintenance.php` — Bug #6 (continued): `SyntaxError` killed entire script**:
+  A PHP heredoc interprets `\n` as a real newline byte (identical to double-quoted
+  strings). The `confirm()` dialog string contained `'...database?\n\n'`, which caused
+  PHP to emit two literal newline characters inside the JS single-quoted string literal,
+  producing an `Uncaught SyntaxError: '' string literal contains an unescaped line break`
+  at column 94 on the rendered page. Because a `SyntaxError` aborts the entire script
+  block before any code runs, all three maintenance tools appeared completely dead (no
+  network requests, no DOM changes on button click). Fixed by escaping the newlines as
+  `\\n\\n` in the heredoc, which PHP outputs as `\n\n` — the correct JS escape
+  sequences.
+
+## [Unreleased] — 2026-06-10
+
+### Fixed
+- **`admin/maintenance.php` — Bug #6: maintenance actions non-functional**:
+  Three compounding issues prevented all three maintenance tools (Integrity Scan,
+  Reload Dimensions, Regenerate Thumbnails) from working:
+  1. **Null guard missing on `$cancel`**: each IIFE guarded `$start` but called
+     `$cancel.addEventListener()` unconditionally. A null `$cancel` would throw a
+     `TypeError` that silently aborted the entire `DOMContentLoaded` callback, leaving
+     all three tools without click listeners. Fixed by adding `!$cancel` to each guard.
+  2. **Relative AJAX URLs**: `fetch('ajax_integrity.php', …)` etc. resolved against
+     `window.location`, which breaks on sub-path installs or under URL rewriting.
+     Fixed by injecting an absolute `AJAX_BASE` constant. The constant was already
+     declared but never used — all four `fetch()` calls now use it.
+  3. **AJAX_BASE derived from `base_url` config**: if `base_url` is empty or wrong,
+     `AJAX_BASE` would also be wrong. Fixed by constructing the URL directly from
+     `$_SERVER['HTTPS']`, `$_SERVER['HTTP_HOST']`, and `$_SERVER['SCRIPT_NAME']` —
+     always accurate regardless of config state.
+  4. **Silent error masking**: when `fetchChunk()` fails (403, 404, 500, or network
+     error) it correctly shows "Error: …" in the status element, but the surrounding
+     `startScan()`/`startTool()` loop then calls `finishScan()`/`finishTool()` which
+     immediately overwrites the status with "Scan complete." and snaps the progress bar
+     to 100% — making every AJAX failure look like an instant silent success. Fixed by
+     adding a `fetchFailed` flag: when set, `finishScan()`/`finishTool()` is skipped
+     so the error message remains visible.
+
+## [Unreleased] — 2026-06-10
+
+### Added
+- **`install/index.php` — auto-delete installer on success**: after writing `config.php`
+  and creating the `albums/` directory, the installer now calls `ins_delete_installer()`
+  which removes all files inside `install/` then removes the directory itself. On
+  Unix/Linux this succeeds even while `index.php` is the running script (the process
+  holds the fd in memory). The completion page shows a green success notice if
+  deletion worked.
+- **`install/index.php` — installer delete failure warning**: if `ins_delete_installer()`
+  returns `false` (restrictive filesystem permissions, Windows), the completion page
+  shows an amber warning asking the admin to remove the directory manually.
+- **`admin/includes/admin_helpers.php` — persistent `install/` security warning**:
+  every admin panel page now checks at render time whether `install/` exists on disk.
+  If it does, a red dismissible alert is shown above the flash messages on every page
+  until the directory is gone. Covers both the auto-delete failure case and existing
+  installations where the installer directory was never cleaned up.
+
+### Changed
+- **`admin/includes/admin_helpers.php` — admin panel branding**: navbar brand updated
+  from `⚡ Lumora Admin` to `⚡ Lumora Gallery Admin` with the version string
+  (`v{ver}`) appended inline as a small, muted `<span>`. Sidebar version badge
+  removed (version is now shown in the topbar only). Page `<title>` updated from
+  `— Lumora Admin` to `— Lumora Gallery Admin` throughout.
+- **`admin/login.php`**: login card `<h1>` updated from `⚡ Lumora Admin` to
+  `⚡ Lumora Gallery Admin` to match.
+
+---
+
+## [Unreleased] — 2026-06-10
+
+### Fixed
+- **`admin/categories.php` — Bug #1** `cat_parent_options()`: malformed `<option>` HTML
+  (`<option value="0"— Root...` was missing the closing `>` after the attribute value),
+  causing the "Root (no parent)" option to render as broken markup in every category
+  parent dropdown.
+- **`admin/categories.php` — Bug #7** Dead heredoc referencing `$s_total` before it was
+  defined generated a PHP `E_WARNING: Undefined variable` on every page load.
+  Removed the dead heredoc and redundant `str_replace()` call; the list is now built
+  directly via string concatenation with `$s_total` correctly in scope.
+- **`admin/config.php` — Config export always returned HTTP 403**: the export URL
+  placed the CSRF token in `$_GET`, but the code called `lumora_csrf_validate()` which
+  checks `$_POST['csrf_token']` only. Replaced with an inline `$_GET['csrf_token']`
+  check so the export link works as intended.
+- **`include/bootstrap.php` — DB error leaked connection details**: the `RuntimeException`
+  message from a failed PDO connection (which may include host, dbname, or username)
+  was passed directly to `htmlspecialchars()` and output to the browser. Now logs the
+  full message via `error_log()` and shows only a generic message to visitors.
+- **`include/bootstrap.php` — `@` error suppression on timezone set**: replaced
+  `@date_default_timezone_set()` (which violates the "Never suppress errors with @"
+  standard) with an explicit `in_array(..., \DateTimeZone::listIdentifiers())` check
+  before calling `date_default_timezone_set()`. Invalid identifiers fall back to UTC
+  with no suppressor needed.
+- **`admin/albums.php` — SQL concatenation in list query**: the optional category
+  filter was applied by appending `' WHERE a.category_id = ' . $filter_cat` to the
+  SQL string, violating "use prepared statements exclusively". Replaced with two
+  dedicated queries, each using `?` parameter binding.
+- **`admin/batch.php` — CSRF token injected into JS with HTML-escaping**: used
+  `'{$csrf}'` (HTML-escaped) instead of `{$csrf_js}` (json-encoded). While safe in
+  practice for hex tokens, the pattern was inconsistent with `maintenance.php`'s
+  correct `json_encode()` approach. Fixed to use `$csrf_js = json_encode(...)` and
+  `var csrf = {$csrf_js};`.
+
+### Changed
+- **`admin/dashboard.php`**, **`admin/account.php`**, **`admin/config.php`**: added
+  missing `@copyright`/`@license` GPL v3 headers to bring all three files in line
+  with the rest of the codebase (every other file already had them).
+
+### Identified (deferred — no code change)
+The following issues were found during the audit but deferred because they require
+an architectural or policy decision rather than a straightforward fix:
+- **`@` suppression on filesystem operations** (`@getimagesize`, `@imagecreatefromjpeg`,
+  `@rename`, `@unlink`, `@mkdir`) across `include/thumb.php`, `include/functions.php`,
+  `admin/albums.php`, and `install/index.php`. These suppress E_WARNING from the PHP
+  runtime. Eliminating them requires a consistent policy (e.g. a filesystem wrapper
+  that converts warnings to exceptions) and is a larger refactor.
+- **Global `$LUMORA_CONFIG`** in `include/functions.php` — violates "avoid global
+  state"; migrating to a static class property or registry is an architectural change.
+- **Duplicated `<optgroup>` album-selector loop** in `admin/batch.php` and
+  `admin/maintenance.php` — should be extracted to `admin/includes/admin_helpers.php`.
+
+### Audited (no change needed — already compliant)
+The following TODO items and suspected issues were confirmed **already fixed** in the
+current codebase (all verified by reading each file in full):
+- Bug #2: `$new_count` initialised to `0` before conditional in `batch.php`.
+- Bug #3: Installer Step 1 POST handler is reachable and functions correctly.
+- Bug #4: All `config.php` output values are pre-escaped with `h()` into `$v_*`
+  variables before heredoc interpolation; no `str_replace()` escaping attempt exists.
+- Bug #5: `declare(strict_types=1)` present in all 26 PHP source files.
+- Bug #6: All three maintenance tools (integrity scan, reload dimensions,
+  regenerate thumbnails) are fully implemented with proper `fetch()` AJAX handlers.
+- Bug #8: Installer uses `date('Y-m-d H:i:s', $ts)` for human-readable timestamps.
+
+---
+
+## [Unreleased] — 2026-06-10
+
+### Added
+- **`latest_albums_count` config key** (default `5`) — controls how many recently updated
+  albums are displayed on the home page in the forthcoming "Latest Updated Albums" section.
+  Set to `0` to hide the section entirely. Accepted range: 0–50.
+  - Added to the installer's `$config_defaults` so all fresh installs receive the key.
+  - Admin UI control added to **Admin → Configuration → Gallery Behavior** under the
+    existing Count Album Views / Gallery Offline row.
+  - Included in the save whitelist, `match` sanitisation branch
+    (`max(0, min(50, ...))`) and the config import `$safe_keys` list.
+- **`get_latest_updated_albums(int $limit): array`** in `include/functions.php` —
+  returns public albums ordered by their newest approved image's `added_at` timestamp.
+  Excludes albums with no approved images. Used by the home page once the front-page
+  "Show last updated Albums" feature is implemented.
+
+### Changed
+- Marked all four **Maintenance** TODO items complete (`[x]`): Reload Dimensions, Update
+  Thumbnails, File Integrity Check, and Album Scope Selector were all fully implemented
+  in a previous session but not ticked off in `TODO.md`.
+- Marked **Legal** TODO items complete (`[x]`): GPL v3 license and developer credits
+  were added in a previous session (see CHANGELOG 2026-06-08) but not ticked off.
+- Marked **"Make the number of last updated Albums selectable in config"** as `[x]` in
+  `TODO.md` — implemented above.
+
+### Database migration
+No schema changes required for this update. All new state is stored as a
+`{PREFIX}config` key (`latest_albums_count`). No table additions or alterations needed.
+
+---
+
 ## [Unreleased] — 2026-06-08
 
 ### Added

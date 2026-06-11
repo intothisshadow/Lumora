@@ -66,11 +66,23 @@ function lum_admin_page(string $title, string $content, string $active = ''): ne
     $title_h      = h($title);
     $gallery_name = h(lumora_config('gallery_name', 'Lumora Gallery'));
 
+    // Persistent security warning: shown on every admin page until install/ is gone.
+    // The directory should be auto-deleted by the installer on success, but may
+    // survive on restrictive filesystems or after a forced reinstall.
+    $install_warn = is_dir(LUMORA_ROOT . 'install')
+        ? '<div class="alert alert-danger alert-dismissible fade show py-2 mb-3" role="alert">'
+          . '<strong>Security warning:</strong> The <code>install/</code> directory still exists. '
+          . 'Delete it immediately via FTP or your hosting control panel to prevent unauthorised reinstallation.'
+          . '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>'
+          . '</div>'
+        : '';
+
     $nav_items = [
         'dashboard'   => ['icon' => '📊', 'label' => 'Dashboard',     'url' => 'dashboard.php'],
         'batch'       => ['icon' => '⬆️', 'label' => 'Batch Add',     'url' => 'batch.php'],
         'categories'  => ['icon' => '📁', 'label' => 'Categories',    'url' => 'categories.php'],
         'albums'      => ['icon' => '🖼️', 'label' => 'Albums',        'url' => 'albums.php'],
+        'images'      => ['icon' => '📸', 'label' => 'Images',        'url' => 'images.php'],
         'config'      => ['icon' => '⚙️', 'label' => 'Configuration', 'url' => 'config.php'],
         'maintenance' => ['icon' => '🔧', 'label' => 'Maintenance',   'url' => 'maintenance.php'],
         'account'     => ['icon' => '👤', 'label' => 'Account',       'url' => 'account.php'],
@@ -91,14 +103,14 @@ function lum_admin_page(string $title, string $content, string $active = ''): ne
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{$title_h} — Lumora Admin</title>
+  <title>{$title_h} — Lumora Gallery Admin</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="{$admin_url}admin.css">
 </head>
 <body class="lum-admin">
 
 <nav class="navbar navbar-expand-lg navbar-dark lum-admin-topbar px-3">
-  <a class="navbar-brand fw-bold" href="{$admin_url}">⚡ Lumora Admin</a>
+  <a class="navbar-brand fw-bold" href="{$admin_url}">⚡ Lumora Gallery Admin <span class="opacity-50 fw-normal small">v{$ver}</span></a>
   <button class="navbar-toggler ms-auto me-2" type="button" data-bs-toggle="collapse"
           data-bs-target="#adminNav" aria-controls="adminNav" aria-expanded="false">
     <span class="navbar-toggler-icon"></span>
@@ -128,12 +140,12 @@ function lum_admin_page(string $title, string $content, string $active = ''): ne
     <ul class="lum-admin-nav list-unstyled m-0 p-0">
       {$nav_html}
     </ul>
-    <div class="lum-admin-version px-3 py-2 text-white-50 small mt-auto">v{$ver}</div>
   </aside>
 
   <!-- Main -->
   <main class="lum-admin-main p-3 p-md-4">
     <h1 class="h4 mb-3">{$title_h}</h1>
+    {$install_warn}
     {$flash}
     {$content}
   </main>

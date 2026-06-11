@@ -475,6 +475,31 @@ function get_image_neighbours(int $image_id, int $album_id, string $sort = 'pos'
 
 // ── Gallery-wide image queries ────────────────────────────────────────────────
 
+/**
+ * Get albums with the most recently added images (public albums only).
+ * Used on the home page when latest_albums_count > 0.
+ *
+ * Results are sorted by the newest image added_at in each album.
+ * Albums with no approved images are excluded.
+ *
+ * @return array[] Each row is an album row plus image_count and latest_added_at.
+ */
+function get_latest_updated_albums(int $limit = 5): array
+{
+    if ($limit <= 0) return [];
+    return LumoraDB::fetchAll(
+        'SELECT a.*,
+             (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count,
+             (SELECT MAX(i2.added_at) FROM `{PREFIX}images` i2 WHERE i2.album_id = a.id AND i2.approved = 1) AS latest_added_at
+         FROM `{PREFIX}albums` a
+         WHERE a.visibility = 0
+         HAVING latest_added_at IS NOT NULL
+         ORDER BY latest_added_at DESC
+         LIMIT ?',
+        [$limit]
+    );
+}
+
 /** Most-viewed approved images (public albums only). */
 function get_most_viewed_images(int $limit = 48): array
 {
@@ -529,6 +554,79 @@ function get_gallery_stats(): array
         'albums'      => (int) LumoraDB::fetchValue('SELECT COUNT(*) FROM `{PREFIX}albums`'),
         'images'      => (int) LumoraDB::fetchValue('SELECT COUNT(*) FROM `{PREFIX}images` WHERE approved = 1'),
         'total_hits'  => (int) LumoraDB::fetchValue('SELECT COALESCE(SUM(hits),0) FROM `{PREFIX}images`'),
+    ];
+}
+
+// ── Who Is Online ─────────────────────────────────────────────────────────────
+
+/**
+ * Record (or refresh) the current visitor's IP in the online-tracking table.
+ *
+ * On each call:
+ *   1. Deletes rows whose last_action is older than `who_is_online_duration` minutes.
+ *   2. Upserts the current IP with last_action = NOW().
+ *
+ * Fails silently when the {PREFIX}online table is absent so that installs that
+ * have not yet run the DB version 5 migration are unaffected.
+ *
+ * Should be called from every public-facing entry point (index.php, album.php)
+ * but NOT from admin pages.
+ */
+function lumora_track_visitor(): void
+{
+    $ip = substr((string) ($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45);
+    if ($ip === '') return;
+
+    $duration = max(1, (int) lumora_config('who_is_online_duration', '5'));
+
+    try {
+        LumoraDB::query(
+            'DELETE FROM `{PREFIX}online` WHERE last_action < NOW() - INTERVAL ? MINUTE',
+            [$duration]
+        );
+        LumoraDB::query(
+            'INSERT INTO `{PREFIX}online` (ip, last_action) VALUES (?, NOW())
+             ON DUPLICATE KEY UPDATE last_action = NOW()',
+            [$ip]
+        );
+    } catch (\Throwable) {
+        // {PREFIX}online absent on pre-v5 installs; fail silently.
+    }
+}
+
+/**
+ * Return the current online visitor count and the all-time record.
+ *
+ * Also updates the `online_record_count` / `online_record_date` config keys
+ * when the current count exceeds the stored record.
+ *
+ * Returns ['online' => int, 'record_count' => int, 'record_date' => string].
+ * On pre-v5 installs where the table is absent, 'online' is 0.
+ *
+ * @return array{online: int, record_count: int, record_date: string}
+ */
+function get_online_stats(): array
+{
+    try {
+        $count = (int) LumoraDB::fetchValue('SELECT COUNT(*) FROM `{PREFIX}online`');
+    } catch (\Throwable) {
+        return ['online' => 0, 'record_count' => 0, 'record_date' => ''];
+    }
+
+    $record      = max(0, (int) lumora_config('online_record_count', '0'));
+    $record_date = (string) lumora_config('online_record_date', '');
+
+    if ($count > $record) {
+        $record      = $count;
+        $record_date = date('Y-m-d H:i:s');
+        lumora_set_config('online_record_count', (string) $record);
+        lumora_set_config('online_record_date',  $record_date);
+    }
+
+    return [
+        'online'       => $count,
+        'record_count' => $record,
+        'record_date'  => $record_date,
     ];
 }
 

@@ -45,6 +45,9 @@ if (lumora_config('count_album_views', '1') === '1') {
     }
 }
 
+// ── Track visitor for "Who Is Online" ─────────────────────────────────
+lumora_track_visitor();
+
 // ── Logging ───────────────────────────────────────────────────────────────────
 lumora_log('visit', 'album ' . $album_id . ' ' . ($_SERVER['REQUEST_URI'] ?? ''));
 
