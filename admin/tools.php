@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 /**
- * Lumora Gallery — Admin Maintenance
+ * Lumora Gallery — Admin: Tools
  *
  * Three AJAX-driven tools, all sharing an optional album scope selector:
  *
@@ -88,7 +88,7 @@ $csrf_js      = json_encode(lumora_csrf_token());
 // Use the configured base_url (from DB) rather than reconstructing from $_SERVER
 // to avoid HTTP_HOST injection and keep the URL consistent with the rest of the app.
 $ajax_base_js = json_encode(lumora_base_url() . 'admin/');
-$maint_url_h  = h(lumora_base_url() . 'admin/maintenance.php');
+$maint_url_h  = h(lumora_base_url() . 'admin/tools.php');
 
 $content = <<<HTML
 <!-- ── Album Scope Selector ─────────────────────────────────────────────── -->
@@ -782,4 +782,4 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 HTML;
 
-lum_admin_page('Maintenance', $content, 'maintenance');
+lum_admin_page('Tools', $content, 'tools');

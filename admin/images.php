@@ -423,6 +423,7 @@ HTML;
   <td class="pe-0" style="width:30px">
     <input type="checkbox" class="form-check-input lum-img-check" value="{$img_id_v}">
   </td>
+  <td class="text-muted small text-nowrap" style="width:50px">{$img_id_v}</td>
   <td style="width:70px">
     <a href="{$orig_url_h}" target="_blank" rel="noopener">
       <img src="{$thumb_url_h}" alt="{$filename_h}" loading="lazy"
@@ -467,6 +468,7 @@ HTML;
             . '<th style="width:30px">'
             .   '<input type="checkbox" class="form-check-input" id="lum-check-all-header">'
             . '</th>'
+            . '<th class="text-muted" style="width:50px">ID</th>'
             . '<th>Thumb</th>'
             . '<th>Title / Filename</th>'
             . '<th>Dimensions</th>'

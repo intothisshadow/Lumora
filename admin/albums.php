@@ -27,24 +27,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $act = $_POST['action'] ?? '';
 
     if ($act === 'save') {
-        $edit_id    = lumora_int($_POST['id'] ?? 0, 0, 0);
-        $title      = trim($_POST['title']       ?? '');
-        $desc       = trim($_POST['description'] ?? '');
-        $cat_id     = lumora_int($_POST['category_id'] ?? 0, 0, 0);
-        $visibility = lumora_int($_POST['visibility']  ?? 0, 0, 0, 1);
-        $pos        = lumora_int($_POST['pos']          ?? 0, 0, 0);
-        $folder     = lumora_sanitize_folder(trim($_POST['folder'] ?? ''));
+        $edit_id        = lumora_int($_POST['id']             ?? 0, 0, 0);
+        $title          = trim($_POST['title']                ?? '');
+        $desc           = trim($_POST['description']          ?? '');
+        $cat_id         = lumora_int($_POST['category_id']    ?? 0, 0, 0);
+        $visibility     = lumora_int($_POST['visibility']     ?? 0, 0, 0, 1);
+        $pos            = lumora_int($_POST['pos']             ?? 0, 0, 0);
+        $folder         = lumora_sanitize_folder(trim($_POST['folder'] ?? ''));
+        $thumb_image_id = lumora_int($_POST['thumb_image_id'] ?? 0, 0, 0);
 
         if ($title === '') {
             lum_flash('Album title is required.', 'danger');
             lumora_redirect($base . '?action=' . ($edit_id ? 'edit&id=' . $edit_id : 'new'));
         }
 
+        // Validate thumb_image_id if provided.
+        if ($thumb_image_id > 0) {
+            $valid = LumoraDB::fetchValue(
+                'SELECT id FROM `{PREFIX}images` WHERE id = ? AND approved = 1', [$thumb_image_id]
+            );
+            if (!$valid) {
+                lum_flash('Cover image ID ' . $thumb_image_id . ' does not exist or is not approved. Cover cleared.', 'warning');
+                $thumb_image_id = 0;
+            }
+        }
+
         if ($edit_id > 0) {
             // Editing — don't change folder (to avoid breaking filesystem paths).
             LumoraDB::update('albums',
                 ['title' => $title, 'description' => $desc, 'category_id' => $cat_id,
-                 'visibility' => $visibility, 'pos' => $pos],
+                 'visibility' => $visibility, 'pos' => $pos, 'thumb_image_id' => $thumb_image_id],
                 'id = ?', [$edit_id]
             );
             lum_flash('Album updated.');
@@ -54,13 +66,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($folder === '') {
                 // Get the next ID by inserting and retrieving.
                 $new_id = (int) LumoraDB::insert('albums', [
-                    'category_id' => $cat_id,
-                    'folder'      => '__tmp__',   // temporary, replaced immediately
-                    'title'       => $title,
-                    'description' => $desc,
-                    'visibility'  => $visibility,
-                    'pos'         => $pos,
-                    'created_at'  => date('Y-m-d H:i:s'),
+                    'category_id'    => $cat_id,
+                    'folder'         => '__tmp__',   // temporary, replaced immediately
+                    'title'          => $title,
+                    'description'    => $desc,
+                    'visibility'     => $visibility,
+                    'pos'            => $pos,
+                    'thumb_image_id' => $thumb_image_id,
+                    'created_at'     => date('Y-m-d H:i:s'),
                 ]);
                 $folder = lumora_generate_folder($new_id);
                 LumoraDB::update('albums', ['folder' => $folder], 'id = ?', [$new_id]);
@@ -74,13 +87,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     lumora_redirect($base . '?action=new');
                 }
                 LumoraDB::insert('albums', [
-                    'category_id' => $cat_id,
-                    'folder'      => $folder,
-                    'title'       => $title,
-                    'description' => $desc,
-                    'visibility'  => $visibility,
-                    'pos'         => $pos,
-                    'created_at'  => date('Y-m-d H:i:s'),
+                    'category_id'    => $cat_id,
+                    'folder'         => $folder,
+                    'title'          => $title,
+                    'description'    => $desc,
+                    'visibility'     => $visibility,
+                    'pos'            => $pos,
+                    'thumb_image_id' => $thumb_image_id,
+                    'created_at'     => date('Y-m-d H:i:s'),
                 ]);
             }
 
@@ -162,11 +176,12 @@ if ($action === 'new' || $action === 'edit') {
     $ftitle  = $action === 'new' ? 'New Album' : 'Edit Album';
     $title_v = h($album['title']       ?? '');
     $desc_v  = h($album['description'] ?? '');
-    $cat_v   = (int)($album['category_id'] ?? 0);
-    $vis_v   = (int)($album['visibility']  ?? 0);
-    $pos_v   = (int)($album['pos']         ?? 0);
-    $id_v    = (int)($album['id']          ?? 0);
-    $folder_v= h($album['folder']       ?? '');
+    $cat_v   = (int)($album['category_id']    ?? 0);
+    $vis_v   = (int)($album['visibility']     ?? 0);
+    $pos_v   = (int)($album['pos']            ?? 0);
+    $id_v    = (int)($album['id']             ?? 0);
+    $folder_v= h($album['folder']            ?? '');
+    $thumb_v = (int)($album['thumb_image_id'] ?? 0);
     $cat_opts= album_cat_options($all_cats, $cat_v);
     $vis_pub = $vis_v === 0 ? ' selected' : '';
     $vis_prv = $vis_v === 1 ? ' selected' : '';
@@ -215,9 +230,15 @@ if ($action === 'new' || $action === 'edit') {
         <option value="1"{$vis_prv}>Private (hidden)</option>
       </select>
     </div>
-    <div class="mb-4">
+    <div class="mb-3">
       <label class="form-label fw-semibold">Position (sort order)</label>
       <input type="number" name="pos" value="{$pos_v}" class="form-control" style="max-width:120px">
+    </div>
+    <div class="mb-4">
+      <label class="form-label fw-semibold">Cover Image <small class="text-muted">(optional)</small></label>
+      <input type="number" name="thumb_image_id" value="{$thumb_v}" class="form-control"
+             style="max-width:140px" min="0">
+      <div class="form-text">Image ID to use as the album cover thumbnail. 0 = auto-pick the first image in this album.</div>
     </div>
     <button type="submit" class="btn btn-primary">Save Album</button>
   </form>

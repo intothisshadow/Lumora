@@ -134,8 +134,7 @@ function lumora_render_powered_by(): string
         return '';
     }
     return '<small class="text-muted">Powered by '
-        . '<a href="https://code.unloved-heart.net/lumora" rel="noopener">Lumora Gallery</a> '
-        . LUMORA_VERSION
+        . '<a href="https://code.unloved-heart.net/lumora" rel="noopener">Lumora Gallery</a>'
         . '</small>';
 }
 

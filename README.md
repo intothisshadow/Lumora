@@ -49,11 +49,13 @@ Lumora/
 │   ├── ajax_image_rethumb.php   AJAX endpoint for single-image thumbnail regeneration
 │   ├── ajax_integrity.php      AJAX endpoint for integrity scan chunks
 │   ├── ajax_integrity_delete.php  AJAX endpoint for deleting orphaned records
+│   ├── ajax_dimensions.php     AJAX endpoint for reload-dimensions chunks
+│   ├── ajax_thumbs.php         AJAX endpoint for thumbnail regeneration chunks
 │   ├── categories.php          Category management
 │   ├── config.php              Gallery settings, export/import
 │   ├── dashboard.php           Stats overview
 │   ├── images.php               Image management (edit, delete, move, bulk actions)
-│   ├── maintenance.php         Maintenance tools (File Integrity Check)
+│   ├── tools.php               Admin tools (File Integrity Check, Reload Dimensions, Regenerate Thumbnails)
 │   ├── login.php / logout.php
 │   └── admin.css
 ├── albums/                     Image storage — original + thumb_* thumbnails
@@ -134,7 +136,10 @@ migration straightforward — point Lumora at the same `albums/` directory and r
 - **Batch Add** — scan `albums/{folder}/` for new images, process in 50-image AJAX chunks (handles 9000+ without timeout)
 - **Configuration** — all settings in one form; theme selector; live image processor status; gallery behavior and upload limit controls
 - **Config export/import** — JSON backup; import excludes `base_url` to protect other installs
-- **Maintenance → File Integrity Check** — scans all image records and verifies both the original file and its thumbnail exist on disk; runs in 500-image AJAX chunks (handles 500 000+ images); missing files shown in a results table with checkboxes; bulk-delete orphaned DB records in one click; only DB rows are removed, no files on disk touched
+- **Tools** — three maintenance operations, each scoped to all albums or a single album:
+  - **File Integrity Check** — verifies both the original file and thumbnail exist on disk for every image record; runs in 500-image AJAX chunks (handles 500 000+ images); missing files listed in a results table with checkboxes; bulk-delete orphaned DB records in one click (disk files are never touched)
+  - **Reload Dimensions** — re-reads pixel dimensions and file sizes from disk and updates the database; runs in 100-image AJAX chunks; useful after manual file operations or migrations
+  - **Regenerate Thumbnails** — regenerates thumbnails via `lumora_generate_thumb()` for every image; runs in 20-image AJAX chunks; respects Imagick/GD availability
 - **Account** — update username and email address; change password with current-password verification
 
 ### Themes
