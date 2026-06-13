@@ -61,6 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'latest_albums_count',
             'who_is_online_duration',
             'show_powered_by',
+            'category_layout',
         ];
 
         // Boolean checkbox keys: always save even when not present in POST
@@ -87,6 +88,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                                                 ? $_POST[$key] : 'off',
                     'timezone'                              => in_array(trim($_POST[$key]), \DateTimeZone::listIdentifiers(), true)
                                                                 ? trim($_POST[$key]) : 'UTC',
+                    'category_layout'                       => in_array($_POST[$key], ['grid', 'list'], true)
+                                                                ? $_POST[$key] : 'grid',
                     default                                 => trim($_POST[$key]),
                 };
                 lumora_set_config($key, $val);
@@ -120,6 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'count_album_views', 'log_mode', 'gallery_offline',
             'latest_albums_count', 'who_is_online_duration',
             'show_powered_by',
+            'category_layout',
         ];
         $imported = 0;
         foreach ($data['lumora_config'] as $k => $v) {
@@ -157,6 +161,7 @@ $cfg = [
     'latest_albums_count' => lumora_config('latest_albums_count', '5'),
     'who_is_online_duration' => lumora_config('who_is_online_duration', '5'),
     'show_powered_by'        => lumora_config('show_powered_by',        '1'),
+    'category_layout'        => lumora_config('category_layout',        'grid'),
 ];
 
 // Detect active image processor (no config needed — auto-detected at runtime).
@@ -199,6 +204,8 @@ $sel_log_all    = $cfg['log_mode'] === 'all'    ? ' selected' : '';
 $chk_album_views = $cfg['count_album_views'] === '1' ? ' checked' : '';
 $chk_offline      = $cfg['gallery_offline']   === '1' ? ' checked' : '';
 $chk_powered_by   = $cfg['show_powered_by']   === '1' ? ' checked' : '';
+$sel_cat_grid     = $cfg['category_layout']   === 'grid' ? ' selected' : '';
+$sel_cat_list     = $cfg['category_layout']   === 'list' ? ' selected' : '';
 $v_latest_albums  = h($cfg['latest_albums_count']);
 $v_who_online_dur = h($cfg['who_is_online_duration']);
 
@@ -250,7 +257,14 @@ $content = <<<HTML
       <div class="form-text">Display a &ldquo;Powered by Lumora Gallery&rdquo; credit in the site footer. Themes use the <code>{POWERED_BY}</code> template token to control placement.</div>
     </div>
 
-    <!-- ── Images & Thumbnails ────────────────────────────────────── -->
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Category Layout</label>
+      <select name="category_layout" class="form-select" style="max-width:260px">
+        <option value="grid"{$sel_cat_grid}>Grid — card grid (default)</option>
+        <option value="list"{$sel_cat_list}>List — one category per row</option>
+      </select>
+      <div class="form-text">Choose how categories are displayed on the home page and category browsing pages. <em>List</em> shows each category as a row with thumbnail, name, album count, and image count &mdash; inspired by the classic Coppermine layout.</div>
+    </div>
     <hr class="my-4">
     <h6 class="mb-3 text-muted">Images &amp; Thumbnails</h6>
 

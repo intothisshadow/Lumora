@@ -471,6 +471,7 @@ HTML;
         'latest_albums_count'      => '5',
         'who_is_online_duration'   => '5',
         'show_powered_by'          => '1',
+        'category_layout'          => 'grid',
     ];
 
     try {

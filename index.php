@@ -73,7 +73,7 @@ if ($view !== '') {
 
         if (!empty($subcats)) {
             $content .= '<h2 class="lum-section-title">Sub-categories</h2>'
-                . lumora_render_catgrid($subcats, 'category');
+                . lumora_render_categories($subcats);
         }
 
         if (!empty($albums)) {
@@ -103,7 +103,7 @@ if ($view !== '') {
     if (!empty($root_cats)) {
         $mt = !empty($latest_albums) ? ' mt-4' : '';
         $content .= '<h2 class="lum-section-title' . $mt . '">Categories</h2>'
-            . lumora_render_catgrid($root_cats, 'category');
+            . lumora_render_categories($root_cats);
     }
 
     // 3. Latest Additions (thumbnail grid)

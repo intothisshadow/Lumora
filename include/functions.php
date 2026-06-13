@@ -287,14 +287,22 @@ function image_thumb_path(array $image): string
 
 /**
  * Get direct children of a parent category (parent_id = 0 for root).
- * Each row includes album_count and subcategory_count.
+ * Each row includes album_count, subcategory_count, and image_count.
+ * image_count covers only images in albums directly belonging to this category
+ * (not images in sub-category albums).
+ *
+ * @return list<array{id: int, name: string, parent_id: int, pos: int, description: string,
+ *                    thumb_image_id: int, album_count: int, subcategory_count: int, image_count: int}>
  */
 function get_categories(int $parent_id = 0): array
 {
     return LumoraDB::fetchAll(
         'SELECT c.*,
             (SELECT COUNT(*) FROM `{PREFIX}albums`     a  WHERE a.category_id = c.id) AS album_count,
-            (SELECT COUNT(*) FROM `{PREFIX}categories` sc WHERE sc.parent_id  = c.id) AS subcategory_count
+            (SELECT COUNT(*) FROM `{PREFIX}categories` sc WHERE sc.parent_id  = c.id) AS subcategory_count,
+            (SELECT COUNT(*) FROM `{PREFIX}images`     i
+             JOIN `{PREFIX}albums` ia ON ia.id = i.album_id
+             WHERE ia.category_id = c.id AND i.approved = 1)                          AS image_count
          FROM `{PREFIX}categories` c
          WHERE c.parent_id = ?
          ORDER BY c.pos ASC, c.name ASC',
@@ -340,6 +348,97 @@ function get_category_breadcrumb(int $cat_id): array
 }
 
 // ── Albums ────────────────────────────────────────────────────────────────────
+
+/**
+ * Return combined album and image counts for a set of categories, including
+ * all descendant subcategories at any depth.
+ *
+ * Uses three queries total regardless of tree depth or the number of categories
+ * requested:
+ *   1. Load the entire category tree (id + parent_id only) to resolve subtrees in PHP.
+ *   2. Batch album counts by category_id for all descendant IDs.
+ *   3. Batch image counts by category_id for all descendant IDs.
+ *
+ * Used by lumora_render_catlist() so the Albums and Images columns show
+ * gallery-wide totals that match what Coppermine displayed.
+ *
+ * @param list<int> $cat_ids  Root category IDs to aggregate.
+ * @return array<int, array{album_count: int, image_count: int}>
+ *         Keyed by each input cat_id; every input ID is present in the result.
+ */
+function get_category_subtree_counts(array $cat_ids): array
+{
+    if (empty($cat_ids)) return [];
+
+    // 1. Load id + parent_id for the whole tree (two integer columns only).
+    $all_rows    = LumoraDB::fetchAll('SELECT id, parent_id FROM `{PREFIX}categories`');
+    $children_of = []; // parent_id => [child_id, ...]
+    foreach ($all_rows as $row) {
+        $children_of[(int) $row['parent_id']][] = (int) $row['id'];
+    }
+
+    // 2. BFS from each requested root to collect all descendant IDs (inclusive).
+    $subtrees = []; // root_id => [id, id, ...]
+    foreach ($cat_ids as $root_id) {
+        $root_id = (int) $root_id;
+        $ids     = [];
+        $queue   = [$root_id];
+        while (!empty($queue)) {
+            $id    = array_shift($queue);
+            $ids[] = $id;
+            foreach ($children_of[$id] ?? [] as $child_id) {
+                $queue[] = $child_id;
+            }
+        }
+        $subtrees[$root_id] = $ids;
+    }
+
+    // 3. Flatten all descendant IDs to a unique set for the batch queries.
+    $all_ids = array_values(array_unique(array_merge(...array_values($subtrees))));
+    if (empty($all_ids)) {
+        return array_fill_keys(array_map('intval', $cat_ids), ['album_count' => 0, 'image_count' => 0]);
+    }
+    $ph = implode(',', array_fill(0, count($all_ids), '?'));
+
+    // 4. Album count per leaf category_id.
+    $album_per_cat = [];
+    $rows = LumoraDB::fetchAll(
+        "SELECT category_id, COUNT(*) AS cnt FROM `{PREFIX}albums`
+         WHERE category_id IN ({$ph}) GROUP BY category_id",
+        $all_ids
+    );
+    foreach ($rows as $row) {
+        $album_per_cat[(int) $row['category_id']] = (int) $row['cnt'];
+    }
+
+    // 5. Image count per leaf category_id (via album join).
+    $image_per_cat = [];
+    $rows = LumoraDB::fetchAll(
+        "SELECT a.category_id, COUNT(*) AS cnt
+         FROM `{PREFIX}images` i
+         JOIN `{PREFIX}albums` a ON a.id = i.album_id
+         WHERE a.category_id IN ({$ph}) AND i.approved = 1
+         GROUP BY a.category_id",
+        $all_ids
+    );
+    foreach ($rows as $row) {
+        $image_per_cat[(int) $row['category_id']] = (int) $row['cnt'];
+    }
+
+    // 6. Aggregate per-leaf counts back to each input root.
+    $result = [];
+    foreach ($cat_ids as $root_id) {
+        $root_id = (int) $root_id;
+        $albums  = 0;
+        $images  = 0;
+        foreach ($subtrees[$root_id] as $id) {
+            $albums += $album_per_cat[$id] ?? 0;
+            $images += $image_per_cat[$id] ?? 0;
+        }
+        $result[$root_id] = ['album_count' => $albums, 'image_count' => $images];
+    }
+    return $result;
+}
 
 /**
  * Get albums in a category, with image_count.

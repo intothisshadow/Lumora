@@ -133,7 +133,7 @@ function lumora_render_powered_by(): string
     if (lumora_config('show_powered_by', '1') !== '1') {
         return '';
     }
-    return '<small class="text-muted">Powered by '
+    return '<small>Powered by '
         . '<a href="https://code.unloved-heart.net/lumora" rel="noopener">Lumora Gallery</a>'
         . '</small>';
 }
@@ -441,6 +441,90 @@ HTML;
 
     $html .= '</div>';
     return $html;
+}
+
+/**
+ * Render a row-based category list (Coppermine-style list layout).
+ *
+ * Each category is displayed as one row with four columns:
+ *   1. Thumbnail
+ *   2. Category name + description
+ *   3. Album count (recursive — includes all descendant subcategories)
+ *   4. Image count (recursive — includes all descendant subcategories)
+ *
+ * Counts are fetched via get_category_subtree_counts() which resolves the
+ * full subtree for each category in three queries total, regardless of
+ * tree depth or category count.
+ *
+ * Only makes sense for categories; use lumora_render_catgrid() for albums.
+ *
+ * @param array $items  Rows from get_categories().
+ */
+function lumora_render_catlist(array $items): string
+{
+    if (empty($items)) {
+        return '<div class="lum-empty alert alert-secondary">No categories found.</div>';
+    }
+
+    // Fetch tree-wide counts (all descendant subcategories included).
+    $cat_ids     = array_map(fn(array $item): int => (int) $item['id'], $items);
+    $tree_counts = get_category_subtree_counts($cat_ids);
+
+    $base = lumora_base_url();
+    $html = '<div class="lum-catlist">';
+
+    // Header row
+    $html .= '<div class="lum-catlist-header">';
+    $html .= '<div class="lum-catlist-header-cell lum-catlist-header-cell--thumb"></div>';
+    $html .= '<div class="lum-catlist-header-cell lum-catlist-header-cell--name">Category</div>';
+    $html .= '<div class="lum-catlist-header-cell lum-catlist-header-cell--albums">Albums</div>';
+    $html .= '<div class="lum-catlist-header-cell lum-catlist-header-cell--images">Images</div>';
+    $html .= '</div>';
+
+    foreach ($items as $item) {
+        $cat_id = (int) $item['id'];
+        $url    = h($base . '?cat=' . $cat_id);
+        $title  = h($item['name']);
+        $desc   = !empty($item['description'])
+            ? '<div class="lum-catlist-desc">' . nl2br(h($item['description'])) . '</div>'
+            : '';
+
+        $tc     = $tree_counts[$cat_id] ?? ['album_count' => 0, 'image_count' => 0];
+        $albums = number_format($tc['album_count']);
+        $images = number_format($tc['image_count']);
+
+        $thumb_html = lumora_render_item_thumb($item, 'category', $url);
+
+        $html .= '<div class="lum-catlist-row">';
+        $html .= '<div class="lum-catlist-col-thumb">' . $thumb_html . '</div>';
+        $html .= '<div class="lum-catlist-col-name"><a href="' . $url . '">' . $title . '</a>' . $desc . '</div>';
+        $html .= '<div class="lum-catlist-col-albums">' . $albums . '</div>';
+        $html .= '<div class="lum-catlist-col-images">' . $images . '</div>';
+        $html .= '</div>';
+    }
+
+    $html .= '</div>';
+    return $html;
+}
+
+/**
+ * Render categories using the layout configured in `category_layout` config key.
+ *
+ * 'grid' (default) → lumora_render_catgrid() (Bootstrap card grid)
+ * 'list'           → lumora_render_catlist() (Coppermine-style row table)
+ *
+ * Always use this function for rendering categories on public pages rather than
+ * calling lumora_render_catgrid() directly, so the admin's layout preference is
+ * honoured everywhere.
+ *
+ * @param array $items  Rows from get_categories().
+ */
+function lumora_render_categories(array $items): string
+{
+    if (lumora_config('category_layout', 'grid') === 'list') {
+        return lumora_render_catlist($items);
+    }
+    return lumora_render_catgrid($items, 'category');
 }
 
 /**

@@ -6,6 +6,95 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **"Powered by" credit invisible on dark-footer themes** (`include/template.php`,
+  `themes/default/lumora.css`): `lumora_render_powered_by()` was wrapping the credit
+  in `<small class="text-muted">`. Bootstrap 5's `.text-muted` applies
+  `color: #6c757d !important`, overriding any inherited footer colour. In the
+  classic-fansite theme the footer background is dark purple (`#2a1040`), making
+  the gray text invisible. Fixed by removing the `text-muted` class from the
+  generated HTML so the credit inherits its colour from the theme's footer rule.
+  Added an explicit `color: #6c757d` to `.lum-footer` in `lumora.css` so the
+  default theme's visual appearance is unchanged.
+
+### Added
+
+- **Category list layout** (`include/template.php`, `include/functions.php`, `index.php`,
+  `admin/config.php`, `install/index.php`, `themes/default/lumora.css`,
+  `themes/classic-fansite/fansite.css`):
+  A new Coppermine-inspired row-based layout for the category browser, selectable via
+  Admin → Configuration → Appearance → **Category Layout**. Album and Image counts
+  shown in the list view are **recursive** — they aggregate totals across all descendant
+  subcategories at any depth, matching the behaviour of Coppermine's category list.
+  - **`get_category_subtree_counts(array $cat_ids): array`** in `include/functions.php`:
+    Accepts a list of root category IDs. Loads the full category tree once (id +
+    parent_id only), resolves each root's subtree in PHP via BFS, then runs two batch
+    queries (album counts, image counts) with a single `IN (...)` clause covering all
+    descendant IDs. Total: three queries regardless of tree depth or category count.
+    Returns `array<int, array{album_count: int, image_count: int}>` keyed by each input
+    category ID.
+  - **`category_layout` config key** (`'grid'` default | `'list'`): stored in
+    `{PREFIX}config`; seeded as `'grid'` by the installer so fresh installs use the
+    existing card grid and existing installs are completely unaffected until an admin
+    opts in.
+  - **`lumora_render_catlist(array $items): string`** in `include/template.php`:
+    Renders each category as one row with four columns: thumbnail, category name +
+    description, album count, image count. Header row labels the columns. Uses
+    `lumora_render_item_thumb()` so existing cover-image configuration is honoured.
+    Empty-state message matches the pattern of other render functions.
+  - **`lumora_render_categories(array $items): string`** in `include/template.php`:
+    Dispatcher that reads `category_layout` from config and calls either
+    `lumora_render_catlist()` (list) or `lumora_render_catgrid($items, 'category')`
+    (grid). All public category rendering in `index.php` now goes through this
+    function; album rendering continues to call `lumora_render_catgrid()` directly.
+  - **`get_categories()` extended** in `include/functions.php`: a fourth subquery
+    (`image_count`) is now returned alongside the existing `album_count` and
+    `subcategory_count`. Counts approved images in albums that belong directly to
+    the category (not recursive). Docblock updated with `@return` array shape.
+  - **Admin form field** (`admin/config.php`): a `<select>` under Admin →
+    Configuration → Appearance lets the admin switch layouts. `category_layout`
+    added to the POST save whitelist, `match` sanitisation branch, `$cfg` array,
+    import `$safe_keys`, and pre-computed `$sel_cat_grid` / `$sel_cat_list` select
+    states.
+  - **CSS** (`themes/default/lumora.css`, `themes/classic-fansite/fansite.css`):
+    Complete `.lum-catlist`, `.lum-catlist-header`, `.lum-catlist-row`,
+    `.lum-catlist-col-thumb`, `.lum-catlist-col-name`, `.lum-catlist-col-albums`,
+    `.lum-catlist-col-images`, `.lum-catlist-desc` rule sets added to both theme
+    stylesheets. The default theme uses its existing `--lum-accent` and neutral
+    palette; the classic-fansite theme uses `--fs-accent`, `--fs-panel-bg`,
+    `--fs-panel-border`, and `--fs-radius` for full visual consistency. Both
+    include a responsive `@media (max-width: 575px)` breakpoint that shrinks the
+    thumbnail column (140 → 80 px / 120 × 150 → 72 × 90 px) and compacts the
+    count columns.
+
+- **Classic Fansite starter theme** (`themes/classic-fansite/`):
+  A traditional fansite-style theme inspired by the gallery sites of the 2000s–2010s
+  fandom era. Fully responsive; preserves the classic fixed-width centred-panel
+  aesthetic on desktop.
+  - `template.html` — page structure: full-bleed banner, sticky nav bar, content
+    area, footer. Does not use the `{NAVIGATION}` token; instead builds its own
+    nav directly with `{BASE_URL}` links for a completely custom HTML structure.
+    `{CUSTOM_HEADER}` is placed inside `.fs-banner-bg` (absolute-positioned) so a
+    bare `<img>` tag in the custom header file automatically becomes a full-bleed
+    banner image behind the gallery title overlay.
+  - `fansite.css` — all styles defined via CSS custom properties in `:root` for
+    easy one-file customisation. Covers all `lum-*` component classes produced by
+    `include/template.php` (thumbgrid, catgrid, stats, sort bar, pagination,
+    breadcrumb, who-is-online), Bootstrap colour overrides for `.page-link`,
+    `.page-item.active`, and `.btn-outline-primary`, and full responsive rules
+    (mobile-first, breakpoints at 575 px and 992 px). Sticky nav scrolls
+    horizontally on narrow viewports rather than wrapping.
+  - `README.md` — comprehensive customisation guide: full table of CSS variables,
+    five ready-to-use fandom colour presets (dark red/fantasy, ocean blue/sci-fi,
+    forest green/nature, rose gold/pop, midnight gold/historical), instructions for
+    adding a banner image via custom header path, and a step-by-step guide for
+    creating a new derived theme.
+
+---
+
 ## [1.0.0-rc.1] — 2026-06-11
 
 ### Changed

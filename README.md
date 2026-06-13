@@ -71,9 +71,13 @@ Lumora/
 │   ├── index.php
 │   └── schema.sql
 ├── themes/                     Theme folders
-│   └── default/
-│       ├── template.html       Bootstrap 5 base template
-│       └── lumora.css          Gallery styles
+│   ├── default/
+│   │   ├── template.html       Bootstrap 5 base template
+│   │   └── lumora.css          Gallery styles
+│   └── classic-fansite/
+│       ├── template.html       Classic fansite layout (banner, sticky nav, centred panel)
+│       ├── fansite.css         Fully variable-driven styles with fandom colour presets
+│       └── README.md           Customisation guide + theme creation walkthrough
 ├── ajax_hit.php                Public image view counter endpoint (fire-and-forget POST)
 ├── album.php                   Public album view (pagination, sort, lightbox)
 ├── index.php                   Public home, category browse, special views
@@ -143,7 +147,12 @@ migration straightforward — point Lumora at the same `albums/` directory and r
 - **Account** — update username and email address; change password with current-password verification
 
 ### Themes
-Themes live in `themes/{name}/` and require only `template.html`. Copy `themes/default/` as a starting point. The active theme is selected in Admin → Configuration. Multiple themes can be installed simultaneously.
+Themes live in `themes/{name}/` and require only `template.html`. The active theme is selected in Admin → Configuration. Multiple themes can be installed simultaneously.
+
+Two themes are included:
+
+- **`default`** — Bootstrap 5 responsive layout with a dark navbar. Clean and neutral; good starting point for any site.
+- **`classic-fansite`** — Traditional fixed-width fansite layout (2000s–2010s fandom era). Features a full-bleed banner image area, sticky navigation bar, and a centred content panel against a dark outer background. Every design decision is exposed as a CSS custom property, with five ready-made fandom colour presets (dark red/fantasy, ocean blue/sci-fi, forest green/nature, rose gold/pop, midnight gold/historical) documented in `themes/classic-fansite/README.md`. The same file covers how to create a new derived theme in four steps.
 
 ### Thumbnail generation
 - **Imagick PHP extension** preferred — auto-detected, no path configuration needed. Uses IM7 Q16-HDRI for high-quality Lanczos resizing, EXIF auto-orientation, and metadata stripping.

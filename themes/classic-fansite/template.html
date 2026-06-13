@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="{CHARSET}">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{PAGE_TITLE}{GALLERY_NAME}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.css">
+  <link rel="stylesheet" href="{THEME_URL}fansite.css">
+  <link rel="stylesheet" href="{THEME_URL}custom.css">
+</head>
+<body class="fs-body">
+
+  <div class="fs-page">
+
+    <!-- ── Banner ────────────────────────────────────────────────────────────── -->
+    <!-- fs-banner-bg holds the optional {CUSTOM_HEADER} content. Place a single  -->
+    <!-- <img src="..." alt=""> in your custom header file for a full-bleed image. -->
+    <header class="fs-banner">
+      <div class="fs-banner-bg">{CUSTOM_HEADER}</div>
+      <div class="fs-banner-text">
+        <h1 class="fs-banner-title">{GALLERY_NAME}</h1>
+        <p class="fs-banner-desc">{GALLERY_DESCRIPTION}</p>
+      </div>
+    </header>
+
+    <!-- ── Navigation ────────────────────────────────────────────────────────── -->
+    <nav class="fs-nav" aria-label="Site navigation">
+      <div class="fs-nav-inner">
+        <a href="{BASE_URL}" class="fs-nav-link">Home</a>
+        <a href="{BASE_URL}?view=latest" class="fs-nav-link">Latest</a>
+        <a href="{BASE_URL}?view=most_viewed" class="fs-nav-link">Most Viewed</a>
+        <a href="{BASE_URL}?view=random" class="fs-nav-link">Random</a>
+        <span class="fs-nav-admin">{ADMIN_LINK}</span>
+      </div>
+    </nav>
+
+    <!-- ── Main content ──────────────────────────────────────────────────────── -->
+    <main class="fs-main">
+      {CONTENT}
+    </main>
+
+    {CUSTOM_FOOTER}
+
+    <!-- ── Footer ────────────────────────────────────────────────────────────── -->
+    <footer class="fs-footer">
+      {POWERED_BY}
+    </footer>
+
+  </div><!-- .fs-page -->
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+:root {
+    --fs-accent:       #8b0000;
+    --fs-accent-light: #b22222;
+    --fs-page-bg:      #1a0000;
+    --fs-nav-bg:       #2d0000;
+    --fs-footer-bg:    #2d0000;
+    --fs-banner-bg:    linear-gradient(135deg, #2d0000 0%, #8b0000 50%, #2d0000 100%);
+    --fs-body-bg:      #f5eeee;
+    --fs-panel-border: #e8c8c8;
+}
