@@ -1,1 +1,232 @@
+# History — Lumora Gallery
 
+Long-term archive of completed work, migrated from TODO.md on release.
+
+---
+
+## v1.0.0 — Released 2026-06-13
+
+### Maintenance
+
+- [x] Reload file dimensions and size information
+- [x] Update thumbnails
+- [x] File integrity check
+- [x] Add album selector (all albums / specific album) for maintenance tools
+
+---
+
+### Bug Fixes
+
+#### 1. Fix broken root category option in `admin/categories.php`
+
+- [x] Correct the HTML markup.
+- [x] Verify the "Root (no parent)" option appears correctly in the parent category dropdown.
+- [x] Confirm category creation and editing work as expected after the fix.
+
+#### 2. Fix undefined `$new_count` in `admin/batch.php`
+
+- [x] Ensure `$new_count` is always defined before being used.
+- [x] Prevent PHP undefined-variable notices on initial page load.
+- [x] Ensure generated JavaScript remains valid when no album is selected.
+- [x] Verify the batch page loads correctly both before and after album selection.
+
+#### 3. Fix unreachable Step 1 form processing in `install/index.php`
+
+- [x] Review installer control flow.
+- [x] Ensure Step 1 form submissions are processed correctly.
+- [x] Verify database credentials can be submitted and validated.
+- [x] Confirm the installer progresses normally to the next step.
+
+#### 4. Fix ineffective output escaping in `admin/config.php`
+
+- [x] Review all configuration values rendered in the page.
+- [x] Apply escaping before output is generated.
+- [x] Remove or replace the ineffective `str_replace()` logic.
+- [x] Ensure configuration values are safely displayed in form fields and page content.
+
+#### 5. Add `declare(strict_types=1)` to all PHP files
+
+- [x] Add `declare(strict_types=1);` immediately after the opening PHP tag in all applicable files.
+- [x] Review for any type-related issues introduced by strict mode.
+- [x] Resolve any compatibility problems discovered during testing.
+- [x] Verify the application continues to function correctly after the update.
+
+#### 6. Fix non-functional maintenance actions in `maintenance.php`
+
+- [x] Investigate frontend and backend execution flow.
+- [x] Determine why requests are not being processed.
+- [x] Restore functionality for all three maintenance operations.
+- [x] Add error handling and user feedback where appropriate.
+- [x] Verify each action completes successfully and reports progress/results to the user.
+
+#### 7. Clean up undefined `$s_total` usage in `admin/categories.php`
+
+- [x] Remove the undefined variable usage.
+- [x] Refactor content generation to avoid temporary invalid state.
+- [x] Ensure functionality remains unchanged.
+
+#### 8. Improve installer timestamp output in `install/index.php`
+
+- [x] Replace the timestamp with a human-readable date/time format.
+- [x] Use a consistent format such as `date('Y-m-d H:i:s')`.
+- [x] Verify generated configuration files contain readable creation timestamps.
+
+#### 9. "Powered by" invisible in some themes
+
+- [x] Remove the Bootstrap-specific `text-muted` class from the `<small>` element in `lumora_render_powered_by()`.
+- [x] Add an explicit `color` to `.lum-footer` in the default theme's `lumora.css` so its visual appearance is unchanged.
+- [x] Verify the classic-fansite theme inherits `color: var(--fs-footer-text)` from `.fs-footer` (already set) — no change needed there.
+- [x] Confirm the credit is legible in both themes.
+
+---
+
+### Code Audit Against PHP Development Standards
+
+- [x] Deprecated patterns
+- [x] Legacy coding styles
+- [x] Naming convention violations
+- [x] Missing type declarations
+- [x] Missing return types
+- [x] Inconsistent error handling
+- [x] Direct database access patterns that violate current architecture
+- [x] Security concerns
+- [x] Input validation issues
+- [x] Output escaping issues
+- [x] Documentation deficiencies
+- [x] Any code that conflicts with current project guidelines
+- [x] Produce report grouped by: Critical issues, Recommended fixes, Style/compliance issues, Technical debt items
+- [x] Apply straightforward low-risk fixes automatically.
+- [x] Document deferred architectural issues with recommended remediation options.
+- [x] Provide summary of files reviewed, files modified, remaining compliance issues, recommended future cleanup tasks.
+
+---
+
+### Dashboard
+
+- [x] Change text "Lumora Admin" to "Lumora Gallery Admin"
+- [x] Add current version after "Lumora Gallery Admin" text
+
+---
+
+### Albums
+
+- [x] Delete physical folder if it is empty when album is deleted
+- [x] Category thumbnail support
+- [x] Album thumbnail support
+
+---
+
+### Authentication
+
+- [x] Stay logged in feature
+- [x] Remember me checkbox
+
+---
+
+### Installation
+
+- [x] Automatically delete `/install` after successful installation
+- [x] If deletion fails, display Admin warning
+
+---
+
+### Front Page
+
+- [x] Move statistics boxes to bottom
+- [x] Add "Who is online" feature based on `coppermine_onlinestats`
+- [x] Show last updated Albums above Categories
+- [x] Make the number of last updated Albums selectable in config
+
+---
+
+### Legal
+
+- [x] Add GPLv3 license
+- [x] Add developer credits
+
+---
+
+### Themes
+
+- [x] Create a "Classic Fansite" starter theme inspired by the classic fansite layout reference image.
+- [x] Create a reusable fansite theme framework that can be easily customized for different fandoms, celebrities, TV shows, movies, games, and communities.
+- [x] Implement a traditional fansite-style homepage layout:
+  - [x] Header/banner image area
+  - [x] Main navigation menu
+  - [x] Latest Updated Albums section
+  - [x] Categories section
+  - [x] Latest Additions (images) section
+  - [x] Ensure the theme is fully responsive while preserving the classic fansite appearance on desktop.
+  - [x] Document how to create and customize new themes based on the Classic Fansite starter theme.
+
+---
+
+### Planned Configuration Options
+
+- [x] Timezone difference relative to GMT
+- [x] Quality for JPG thumbnails
+- [x] Selectable max size for uploaded files
+- [x] Selectable max width or height for uploaded pictures
+- [x] Count Album Views
+- [x] Coppermine-style logging mode
+- [x] Gallery offline mode
+
+---
+
+### Add "Move to Another Album" Functionality
+
+- [x] Add a "Move to Album" action within image/file management.
+- [x] Support moving a single image/file to another album.
+- [x] Support bulk-moving multiple selected images/files.
+- [x] Provide an album selection interface.
+- [x] Preserve image metadata, comments, views, favorites, and other related data during the move.
+- [x] Update album counts automatically after the operation.
+- [x] Display confirmation and success/error messages.
+- [x] Verify moved items appear correctly in the destination album and are removed from the source album.
+
+---
+
+### Enhance Image Management Feature
+
+- [x] Edit image details
+- [x] Move images between albums
+- [x] Delete images
+- [x] Bulk actions on selected images
+- [x] Replace image
+- [x] Thumbnail regeneration (where applicable)
+
+---
+
+### Move Powered By Credit from Themes to Gallery Configuration
+
+- [x] Remove Powered By credit handling from theme files.
+- [x] Move credit rendering to the core gallery/template system.
+- [x] Ensure the credit is displayed consistently across all themes.
+- [x] Allow future configuration of the credit from gallery settings if desired.
+- [x] Verify existing themes continue to function correctly after the change.
+- [x] Eliminate duplicated Powered By code across theme templates.
+
+---
+
+### Miscellaneous
+
+- [x] Rename Maintenance to Tools
+- [x] Display image id on images.php
+- [x] Rename maintenance.php to tools.php
+- [x] Remove version number from credit footer
+
+---
+
+### Category Structure
+
+- [x] Current layout (as-is) — existing category display preserved.
+- [x] Table/row layout — one category per row with thumbnail, name/description, album count, image count.
+- [x] Add user-selectable option (setting) to switch between current category layout and category-per-row table layout.
+- [x] Preserve existing functionality and sorting behavior.
+- [x] Ensure responsive behavior on mobile, tablet, and desktop screens.
+- [x] Reuse existing category metadata (thumbnail, title, description, album count, file/image count).
+- [x] Make the new layout match the overall structure shown in the reference screenshot.
+- [x] All CSS and template changes implemented across all existing themes (default + classic-fansite).
+- [x] Ensure visual consistency within each theme using existing theme variables, colors, spacing, typography, borders, and component styles.
+- [x] Verify that switching themes does not break the new layout.
+- [x] The layout option is available and functions identically regardless of the active theme.

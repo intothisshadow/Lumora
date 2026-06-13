@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
+## [1.0.0] — 2026-06-13
 
 ### Fixed
 
@@ -94,8 +94,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     creating a new derived theme.
 
 ---
-
-## [1.0.0-rc.1] — 2026-06-11
 
 ### Changed
 
