@@ -10,7 +10,7 @@ declare(strict_types=1);
  * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
-define('LUMORA_VERSION',        '1.0.0');
+define('LUMORA_VERSION',        '1.5.0');
 define('LUMORA_VERSION_STATUS', 'stable');
-define('LUMORA_DB_VERSION',     5);
+define('LUMORA_DB_VERSION',     6);
 define('LUMORA_MIN_PHP',        '8.2.0');

@@ -18,34 +18,23 @@ $base   = lumora_base_url() . 'admin/config.php';
 $csrf   = h(lumora_csrf_token());
 $base_h = h($base);
 
-// ── Config export ─────────────────────────────────────────────────────────────
-if (isset($_GET['export'])) {
-    // CSRF: the export link embeds the token in the query string; validate it here.
-    // lumora_csrf_validate() checks $_POST only, so we validate $_GET directly.
-    // The admin session check (lumora_require_admin() above) is the primary guard.
-    if (
-        !isset($_GET['csrf_token']) ||
-        !hash_equals(lumora_csrf_token(), $_GET['csrf_token'])
-    ) {
-        http_response_code(403);
-        exit('CSRF validation failed.');
-    }
-    $rows = LumoraDB::fetchAll('SELECT name, value FROM `{PREFIX}config` ORDER BY name ASC');
-    $data = [];
-    foreach ($rows as $r) { $data[$r['name']] = $r['value']; }
-    $json = json_encode(['lumora_config' => $data, 'exported_at' => date('c'), 'version' => LUMORA_VERSION], JSON_PRETTY_PRINT);
-    $filename = 'lumora-config-' . date('Ymd-His') . '.json';
-    header('Content-Type: application/json; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    header('Content-Length: ' . strlen($json));
-    echo $json;
-    exit;
-}
-
-// ── POST: save settings ───────────────────────────────────────────────────────
+// ── POST: save settings, export, import ──────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     lumora_csrf_validate();
     $act = $_POST['action'] ?? 'save';
+
+    if ($act === 'export') {
+        $rows = LumoraDB::fetchAll('SELECT name, value FROM `{PREFIX}config` ORDER BY name ASC');
+        $data = [];
+        foreach ($rows as $r) { $data[$r['name']] = $r['value']; }
+        $json = json_encode(['lumora_config' => $data, 'exported_at' => date('c'), 'version' => LUMORA_VERSION], JSON_PRETTY_PRINT);
+        $filename = 'lumora-config-' . date('Ymd-His') . '.json';
+        header('Content-Type: application/json; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . strlen($json));
+        echo $json;
+        exit;
+    }
 
     if ($act === 'save') {
         // White-list the settings we accept.
@@ -209,7 +198,6 @@ $sel_cat_list     = $cfg['category_layout']   === 'list' ? ' selected' : '';
 $v_latest_albums  = h($cfg['latest_albums_count']);
 $v_who_online_dur = h($cfg['who_is_online_duration']);
 
-$export_url = h($base . '?export=1&csrf_token=' . urlencode(lumora_csrf_token()));
 $processor_h = h($processor_status);
 
 $content = <<<HTML
@@ -467,8 +455,12 @@ $content = <<<HTML
   <h5 class="mb-3">Export / Import Configuration</h5>
   <p class="text-muted small">Export your settings to a JSON file for backup, or to quickly configure another Lumora installation.
      <strong>Note:</strong> base_url is never imported to prevent accidentally breaking an install.</p>
-  <div class="d-flex gap-3 flex-wrap">
-    <a href="{$export_url}" class="btn btn-outline-secondary">⬇ Export Config (JSON)</a>
+  <div class="d-flex gap-3 flex-wrap align-items-center">
+    <form method="post" action="{$base_h}">
+      <input type="hidden" name="action"     value="export">
+      <input type="hidden" name="csrf_token" value="{$csrf}">
+      <button type="submit" class="btn btn-outline-secondary">⬇ Export Config (JSON)</button>
+    </form>
     <form method="post" action="{$base_h}" enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
       <input type="hidden" name="action"     value="import">
       <input type="hidden" name="csrf_token" value="{$csrf}">

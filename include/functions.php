@@ -3,8 +3,23 @@ declare(strict_types=1);
 /**
  * Lumora Gallery — Core Functions
  *
- * Covers: config cache, gallery utility helpers, categories, albums, images,
- * stats, pagination, path/URL helpers, and activity logging.
+ * Contains two categories of functions:
+ *
+ *   1. Utility / helper free functions that have no natural class home:
+ *      output escaping, redirects, input coercion, path/URL builders,
+ *      formatters, activity logging, and pagination.
+ *      These are kept as free functions because they are called from every
+ *      context (public pages, admin, AJAX, installer) and carry no state.
+ *
+ *   2. Legacy forwarding wrappers for every function that has been migrated
+ *      to a service class. Each wrapper is a one-liner that delegates to the
+ *      appropriate service method, preserving full backward compatibility for
+ *      all existing callers. New V2 code should call the service classes
+ *      directly: LumoraConfig::, GalleryService::.
+ *
+ * Service classes (loaded by bootstrap.php before this file):
+ *   LumoraConfig   — include/services/LumoraConfig.php
+ *   GalleryService — include/services/GalleryService.php
  *
  * All SQL uses {PREFIX} which LumoraDB::query() replaces at runtime.
  *
@@ -14,22 +29,15 @@ declare(strict_types=1);
 
 if (!defined('LUMORA_ENTRY')) exit('Direct access denied.');
 
-// ── Global config cache ───────────────────────────────────────────────────────
-
-/** @var array<string,string> Runtime config cache (populated by lumora_load_config). */
-$LUMORA_CONFIG = [];
+// ── Config wrappers (delegate to LumoraConfig) ────────────────────────────────
 
 /**
- * Load all rows from lum_config into the in-memory cache.
+ * Load all rows from {PREFIX}config into the in-memory cache.
  * Called once per request by bootstrap.php after DB connection.
  */
 function lumora_load_config(): void
 {
-    global $LUMORA_CONFIG;
-    $rows = LumoraDB::fetchAll('SELECT name, value FROM `{PREFIX}config`');
-    foreach ($rows as $row) {
-        $LUMORA_CONFIG[$row['name']] = $row['value'];
-    }
+    LumoraConfig::load();
 }
 
 /**
@@ -37,8 +45,7 @@ function lumora_load_config(): void
  */
 function lumora_config(string $key, mixed $default = null): mixed
 {
-    global $LUMORA_CONFIG;
-    return array_key_exists($key, $LUMORA_CONFIG) ? $LUMORA_CONFIG[$key] : $default;
+    return LumoraConfig::get($key, $default);
 }
 
 /**
@@ -46,13 +53,7 @@ function lumora_config(string $key, mixed $default = null): mixed
  */
 function lumora_set_config(string $key, mixed $value): void
 {
-    global $LUMORA_CONFIG;
-    $LUMORA_CONFIG[$key] = (string) $value;
-    LumoraDB::query(
-        'INSERT INTO `{PREFIX}config` (name, value) VALUES (?, ?)
-         ON DUPLICATE KEY UPDATE value = VALUES(value)',
-        [$key, (string) $value]
-    );
+    LumoraConfig::set($key, $value);
 }
 
 // ── Activity logging ──────────────────────────────────────────────────────────
@@ -64,8 +65,6 @@ function lumora_set_config(string $key, mixed $value): void
  * 'errors' — only events of $type === 'error' are written to the PHP error log.
  * 'all'    — all events are written to the PHP error log AND inserted into
  *            {PREFIX}log (requires the table added in DB version 2).
- *            If the table does not exist the DB write fails silently so that
- *            existing installs are unaffected until they run the migration.
  *
  * @param string $type    Short event category: 'visit', 'error', 'info'.
  * @param string $message Human-readable description of the event.
@@ -75,13 +74,10 @@ function lumora_log(string $type, string $message): void
     $mode = lumora_config('log_mode', 'off');
     if ($mode === 'off') return;
 
-    // 'errors' mode: only write events of type 'error'.
     if ($mode === 'errors' && $type !== 'error') return;
 
-    // Always write to the PHP error log.
     error_log('Lumora [' . $type . ']: ' . $message);
 
-    // 'all' mode: also persist to the database.
     if ($mode === 'all') {
         try {
             LumoraDB::query(
@@ -131,7 +127,7 @@ function lumora_int(mixed $value, int $default = 0, int $min = 0, int $max = PHP
 // ── Path & URL helpers ────────────────────────────────────────────────────────
 
 /**
- * Gallery base URL with trailing slash. Safe to call once config is loaded.
+ * Gallery base URL with trailing slash.
  */
 function lumora_base_url(): string
 {
@@ -150,7 +146,6 @@ function lumora_album_path(string $folder): string
  * Public URL to an album folder, with trailing slash.
  * Each path segment is percent-encoded individually; forward slashes are
  * preserved as path separators so nested folders resolve correctly.
- * e.g. "Xena/Season1/1x01-SinsOfThePast" → "albums/Xena/Season1/1x01-SinsOfThePast/"
  */
 function lumora_album_url(string $folder): string
 {
@@ -219,7 +214,6 @@ function lumora_format_bytes(int $bytes): string
 
 /**
  * Generate a zero-padded album folder name from an album ID, e.g. "00042".
- * Used as an automatic fallback when the admin does not supply a custom folder path.
  */
 function lumora_generate_folder(int $id): string
 {
@@ -234,22 +228,13 @@ function lumora_generate_folder(int $id): string
  * Strips path traversal (. and ..), hidden-directory segments (leading dot),
  * and any characters outside the allowed set.
  *
- * Examples:
- *   "Xena/Season1/1x01-SinsOfThePast" → "Xena/Season1/1x01-SinsOfThePast"
- *   "../../etc/passwd"                → ""  (traversal stripped)
- *   "  /Xena//Season1/ "              → "Xena/Season1"
- *
  * @return string Clean relative path, or '' if nothing safe remains.
  */
 function lumora_sanitize_folder(string $raw): string
 {
-    // Strip characters not allowed in path segments.
     $clean = preg_replace('/[^a-zA-Z0-9_\-\.\/]/', '', $raw);
-    // Collapse multiple consecutive slashes.
     $clean = (string) preg_replace('#/+#', '/', (string) $clean);
-    // Trim leading/trailing slashes.
     $clean = trim((string) $clean, '/');
-    // Remove segments that are empty, '.', '..', or start with '.' (hidden dirs).
     $segments = array_filter(
         explode('/', $clean),
         static fn(string $s): bool => $s !== '' && $s !== '.' && $s !== '..' && !str_starts_with($s, '.')
@@ -283,452 +268,6 @@ function image_thumb_path(array $image): string
     return lumora_album_path($image['folder']) . LUMORA_THUMB_PREFIX . $image['filename'];
 }
 
-// ── Categories ────────────────────────────────────────────────────────────────
-
-/**
- * Get direct children of a parent category (parent_id = 0 for root).
- * Each row includes album_count, subcategory_count, and image_count.
- * image_count covers only images in albums directly belonging to this category
- * (not images in sub-category albums).
- *
- * @return list<array{id: int, name: string, parent_id: int, pos: int, description: string,
- *                    thumb_image_id: int, album_count: int, subcategory_count: int, image_count: int}>
- */
-function get_categories(int $parent_id = 0): array
-{
-    return LumoraDB::fetchAll(
-        'SELECT c.*,
-            (SELECT COUNT(*) FROM `{PREFIX}albums`     a  WHERE a.category_id = c.id) AS album_count,
-            (SELECT COUNT(*) FROM `{PREFIX}categories` sc WHERE sc.parent_id  = c.id) AS subcategory_count,
-            (SELECT COUNT(*) FROM `{PREFIX}images`     i
-             JOIN `{PREFIX}albums` ia ON ia.id = i.album_id
-             WHERE ia.category_id = c.id AND i.approved = 1)                          AS image_count
-         FROM `{PREFIX}categories` c
-         WHERE c.parent_id = ?
-         ORDER BY c.pos ASC, c.name ASC',
-        [$parent_id]
-    );
-}
-
-/** Get a single category row, or null. */
-function get_category(int $id): ?array
-{
-    return LumoraDB::fetchOne(
-        'SELECT * FROM `{PREFIX}categories` WHERE id = ?',
-        [$id]
-    );
-}
-
-/**
- * Get a flat list of all categories for admin dropdowns.
- */
-function get_all_categories_flat(): array
-{
-    return LumoraDB::fetchAll(
-        'SELECT * FROM `{PREFIX}categories` ORDER BY parent_id ASC, pos ASC, name ASC'
-    );
-}
-
-/**
- * Build the breadcrumb trail for a category, from root to $cat_id.
- * Returns array of ['id', 'name'] sorted root-first.
- */
-function get_category_breadcrumb(int $cat_id): array
-{
-    $trail = [];
-    $id    = $cat_id;
-    $limit = 10; // guard against cycles
-    while ($id > 0 && $limit-- > 0) {
-        $cat = get_category($id);
-        if (!$cat) break;
-        array_unshift($trail, ['id' => (int) $cat['id'], 'name' => $cat['name']]);
-        $id = (int) $cat['parent_id'];
-    }
-    return $trail;
-}
-
-// ── Albums ────────────────────────────────────────────────────────────────────
-
-/**
- * Return combined album and image counts for a set of categories, including
- * all descendant subcategories at any depth.
- *
- * Uses three queries total regardless of tree depth or the number of categories
- * requested:
- *   1. Load the entire category tree (id + parent_id only) to resolve subtrees in PHP.
- *   2. Batch album counts by category_id for all descendant IDs.
- *   3. Batch image counts by category_id for all descendant IDs.
- *
- * Used by lumora_render_catlist() so the Albums and Images columns show
- * gallery-wide totals that match what Coppermine displayed.
- *
- * @param list<int> $cat_ids  Root category IDs to aggregate.
- * @return array<int, array{album_count: int, image_count: int}>
- *         Keyed by each input cat_id; every input ID is present in the result.
- */
-function get_category_subtree_counts(array $cat_ids): array
-{
-    if (empty($cat_ids)) return [];
-
-    // 1. Load id + parent_id for the whole tree (two integer columns only).
-    $all_rows    = LumoraDB::fetchAll('SELECT id, parent_id FROM `{PREFIX}categories`');
-    $children_of = []; // parent_id => [child_id, ...]
-    foreach ($all_rows as $row) {
-        $children_of[(int) $row['parent_id']][] = (int) $row['id'];
-    }
-
-    // 2. BFS from each requested root to collect all descendant IDs (inclusive).
-    $subtrees = []; // root_id => [id, id, ...]
-    foreach ($cat_ids as $root_id) {
-        $root_id = (int) $root_id;
-        $ids     = [];
-        $queue   = [$root_id];
-        while (!empty($queue)) {
-            $id    = array_shift($queue);
-            $ids[] = $id;
-            foreach ($children_of[$id] ?? [] as $child_id) {
-                $queue[] = $child_id;
-            }
-        }
-        $subtrees[$root_id] = $ids;
-    }
-
-    // 3. Flatten all descendant IDs to a unique set for the batch queries.
-    $all_ids = array_values(array_unique(array_merge(...array_values($subtrees))));
-    if (empty($all_ids)) {
-        return array_fill_keys(array_map('intval', $cat_ids), ['album_count' => 0, 'image_count' => 0]);
-    }
-    $ph = implode(',', array_fill(0, count($all_ids), '?'));
-
-    // 4. Album count per leaf category_id.
-    $album_per_cat = [];
-    $rows = LumoraDB::fetchAll(
-        "SELECT category_id, COUNT(*) AS cnt FROM `{PREFIX}albums`
-         WHERE category_id IN ({$ph}) GROUP BY category_id",
-        $all_ids
-    );
-    foreach ($rows as $row) {
-        $album_per_cat[(int) $row['category_id']] = (int) $row['cnt'];
-    }
-
-    // 5. Image count per leaf category_id (via album join).
-    $image_per_cat = [];
-    $rows = LumoraDB::fetchAll(
-        "SELECT a.category_id, COUNT(*) AS cnt
-         FROM `{PREFIX}images` i
-         JOIN `{PREFIX}albums` a ON a.id = i.album_id
-         WHERE a.category_id IN ({$ph}) AND i.approved = 1
-         GROUP BY a.category_id",
-        $all_ids
-    );
-    foreach ($rows as $row) {
-        $image_per_cat[(int) $row['category_id']] = (int) $row['cnt'];
-    }
-
-    // 6. Aggregate per-leaf counts back to each input root.
-    $result = [];
-    foreach ($cat_ids as $root_id) {
-        $root_id = (int) $root_id;
-        $albums  = 0;
-        $images  = 0;
-        foreach ($subtrees[$root_id] as $id) {
-            $albums += $album_per_cat[$id] ?? 0;
-            $images += $image_per_cat[$id] ?? 0;
-        }
-        $result[$root_id] = ['album_count' => $albums, 'image_count' => $images];
-    }
-    return $result;
-}
-
-/**
- * Get albums in a category, with image_count.
- * $sort: 'pos' | 'title' | 'newest' | 'hits'
- */
-function get_albums(int $category_id, string $sort = 'pos'): array
-{
-    $order = match($sort) {
-        'title'  => 'a.title ASC',
-        'newest' => 'a.created_at DESC',
-        'hits'   => 'a.hits DESC',
-        default  => 'a.pos ASC, a.title ASC',
-    };
-    return LumoraDB::fetchAll(
-        "SELECT a.*,
-             (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
-         FROM `{PREFIX}albums` a
-         WHERE a.category_id = ? AND a.visibility = 0
-         ORDER BY {$order}",
-        [$category_id]
-    );
-}
-
-/**
- * Get a single album row (with image_count), or null.
- */
-function get_album(int $id): ?array
-{
-    return LumoraDB::fetchOne(
-        'SELECT a.*,
-             (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
-         FROM `{PREFIX}albums` a
-         WHERE a.id = ?',
-        [$id]
-    );
-}
-
-/** Increment album hit counter (do throttle with session on caller side). */
-function increment_album_hits(int $album_id): void
-{
-    LumoraDB::query('UPDATE `{PREFIX}albums` SET hits = hits + 1 WHERE id = ?', [$album_id]);
-}
-
-// ── Images ────────────────────────────────────────────────────────────────────
-
-/**
- * Get a paginated set of approved images for an album.
- * $sort: 'pos' | 'newest' | 'oldest' | 'most_viewed' | 'filename'
- */
-function get_album_images(int $album_id, int $page = 1, int $per_page = 48, string $sort = 'pos'): array
-{
-    $order = match($sort) {
-        'newest'      => 'i.added_at DESC',
-        'oldest'      => 'i.added_at ASC',
-        'most_viewed' => 'i.hits DESC',
-        'filename'    => 'i.filename ASC',
-        default       => 'i.pos ASC, i.id ASC',
-    };
-    $offset = max(0, ($page - 1)) * $per_page;
-    return LumoraDB::fetchAll(
-        "SELECT i.*, a.folder
-         FROM `{PREFIX}images` i
-         JOIN `{PREFIX}albums` a ON a.id = i.album_id
-         WHERE i.album_id = ? AND i.approved = 1
-         ORDER BY {$order}
-         LIMIT ? OFFSET ?",
-        [$album_id, $per_page, $offset]
-    );
-}
-
-/** Count approved images in an album. */
-function count_album_images(int $album_id): int
-{
-    return (int) LumoraDB::fetchValue(
-        'SELECT COUNT(*) FROM `{PREFIX}images` WHERE album_id = ? AND approved = 1',
-        [$album_id]
-    );
-}
-
-/**
- * Get a single approved image with its album folder and category_id.
- */
-function get_image(int $id): ?array
-{
-    return LumoraDB::fetchOne(
-        'SELECT i.*, a.folder, a.title AS album_title, a.category_id
-         FROM `{PREFIX}images` i
-         JOIN `{PREFIX}albums` a ON a.id = i.album_id
-         WHERE i.id = ? AND i.approved = 1',
-        [$id]
-    );
-}
-
-/** Increment image hit counter. */
-function increment_image_hits(int $image_id): void
-{
-    LumoraDB::query('UPDATE `{PREFIX}images` SET hits = hits + 1 WHERE id = ?', [$image_id]);
-}
-
-/**
- * Get the previous and next image IDs in an album relative to a given image.
- * Returns ['prev' => ?int, 'next' => ?int].
- *
- * Loads all IDs in order once; efficient for typical album sizes.
- * For 9000-image albums this returns ~9000 ints (~72 KB), which is acceptable.
- */
-function get_image_neighbours(int $image_id, int $album_id, string $sort = 'pos'): array
-{
-    $order = match($sort) {
-        'newest'      => 'i.added_at DESC',
-        'oldest'      => 'i.added_at ASC',
-        'most_viewed' => 'i.hits DESC',
-        'filename'    => 'i.filename ASC',
-        default       => 'i.pos ASC, i.id ASC',
-    };
-
-    $ids = array_column(
-        LumoraDB::fetchAll(
-            "SELECT id FROM `{PREFIX}images` WHERE album_id = ? AND approved = 1 ORDER BY {$order}",
-            [$album_id]
-        ),
-        'id'
-    );
-
-    $pos = array_search((string) $image_id, array_map('strval', $ids), true);
-    if ($pos === false) return ['prev' => null, 'next' => null];
-
-    return [
-        'prev' => $pos > 0                    ? (int) $ids[$pos - 1] : null,
-        'next' => $pos < (count($ids) - 1)    ? (int) $ids[$pos + 1] : null,
-    ];
-}
-
-// ── Gallery-wide image queries ────────────────────────────────────────────────
-
-/**
- * Get albums with the most recently added images (public albums only).
- * Used on the home page when latest_albums_count > 0.
- *
- * Results are sorted by the newest image added_at in each album.
- * Albums with no approved images are excluded.
- *
- * @return array[] Each row is an album row plus image_count and latest_added_at.
- */
-function get_latest_updated_albums(int $limit = 5): array
-{
-    if ($limit <= 0) return [];
-    return LumoraDB::fetchAll(
-        'SELECT a.*,
-             (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count,
-             (SELECT MAX(i2.added_at) FROM `{PREFIX}images` i2 WHERE i2.album_id = a.id AND i2.approved = 1) AS latest_added_at
-         FROM `{PREFIX}albums` a
-         WHERE a.visibility = 0
-         HAVING latest_added_at IS NOT NULL
-         ORDER BY latest_added_at DESC
-         LIMIT ?',
-        [$limit]
-    );
-}
-
-/** Most-viewed approved images (public albums only). */
-function get_most_viewed_images(int $limit = 48): array
-{
-    return LumoraDB::fetchAll(
-        'SELECT i.*, a.folder, a.title AS album_title
-         FROM `{PREFIX}images` i
-         JOIN `{PREFIX}albums` a ON a.id = i.album_id
-         WHERE i.approved = 1 AND a.visibility = 0
-         ORDER BY i.hits DESC
-         LIMIT ?',
-        [$limit]
-    );
-}
-
-/** Most recently added images (public albums only). */
-function get_latest_images(int $limit = 48): array
-{
-    return LumoraDB::fetchAll(
-        'SELECT i.*, a.folder, a.title AS album_title
-         FROM `{PREFIX}images` i
-         JOIN `{PREFIX}albums` a ON a.id = i.album_id
-         WHERE i.approved = 1 AND a.visibility = 0
-         ORDER BY i.added_at DESC
-         LIMIT ?',
-        [$limit]
-    );
-}
-
-/** Random images from public albums. */
-function get_random_images(int $limit = 48): array
-{
-    return LumoraDB::fetchAll(
-        'SELECT i.*, a.folder, a.title AS album_title
-         FROM `{PREFIX}images` i
-         JOIN `{PREFIX}albums` a ON a.id = i.album_id
-         WHERE i.approved = 1 AND a.visibility = 0
-         ORDER BY RAND()
-         LIMIT ?',
-        [$limit]
-    );
-}
-
-// ── Stats ─────────────────────────────────────────────────────────────────────
-
-/**
- * Return basic gallery stats: categories, albums, images, total hits.
- */
-function get_gallery_stats(): array
-{
-    return [
-        'categories'  => (int) LumoraDB::fetchValue('SELECT COUNT(*) FROM `{PREFIX}categories`'),
-        'albums'      => (int) LumoraDB::fetchValue('SELECT COUNT(*) FROM `{PREFIX}albums`'),
-        'images'      => (int) LumoraDB::fetchValue('SELECT COUNT(*) FROM `{PREFIX}images` WHERE approved = 1'),
-        'total_hits'  => (int) LumoraDB::fetchValue('SELECT COALESCE(SUM(hits),0) FROM `{PREFIX}images`'),
-    ];
-}
-
-// ── Who Is Online ─────────────────────────────────────────────────────────────
-
-/**
- * Record (or refresh) the current visitor's IP in the online-tracking table.
- *
- * On each call:
- *   1. Deletes rows whose last_action is older than `who_is_online_duration` minutes.
- *   2. Upserts the current IP with last_action = NOW().
- *
- * Fails silently when the {PREFIX}online table is absent so that installs that
- * have not yet run the DB version 5 migration are unaffected.
- *
- * Should be called from every public-facing entry point (index.php, album.php)
- * but NOT from admin pages.
- */
-function lumora_track_visitor(): void
-{
-    $ip = substr((string) ($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45);
-    if ($ip === '') return;
-
-    $duration = max(1, (int) lumora_config('who_is_online_duration', '5'));
-
-    try {
-        LumoraDB::query(
-            'DELETE FROM `{PREFIX}online` WHERE last_action < NOW() - INTERVAL ? MINUTE',
-            [$duration]
-        );
-        LumoraDB::query(
-            'INSERT INTO `{PREFIX}online` (ip, last_action) VALUES (?, NOW())
-             ON DUPLICATE KEY UPDATE last_action = NOW()',
-            [$ip]
-        );
-    } catch (\Throwable) {
-        // {PREFIX}online absent on pre-v5 installs; fail silently.
-    }
-}
-
-/**
- * Return the current online visitor count and the all-time record.
- *
- * Also updates the `online_record_count` / `online_record_date` config keys
- * when the current count exceeds the stored record.
- *
- * Returns ['online' => int, 'record_count' => int, 'record_date' => string].
- * On pre-v5 installs where the table is absent, 'online' is 0.
- *
- * @return array{online: int, record_count: int, record_date: string}
- */
-function get_online_stats(): array
-{
-    try {
-        $count = (int) LumoraDB::fetchValue('SELECT COUNT(*) FROM `{PREFIX}online`');
-    } catch (\Throwable) {
-        return ['online' => 0, 'record_count' => 0, 'record_date' => ''];
-    }
-
-    $record      = max(0, (int) lumora_config('online_record_count', '0'));
-    $record_date = (string) lumora_config('online_record_date', '');
-
-    if ($count > $record) {
-        $record      = $count;
-        $record_date = date('Y-m-d H:i:s');
-        lumora_set_config('online_record_count', (string) $record);
-        lumora_set_config('online_record_date',  $record_date);
-    }
-
-    return [
-        'online'       => $count,
-        'record_count' => $record,
-        'record_date'  => $record_date,
-    ];
-}
-
 // ── Pagination ────────────────────────────────────────────────────────────────
 
 /**
@@ -739,7 +278,7 @@ function get_online_stats(): array
  */
 function lumora_pagination(int $total, int $per_page, int $current_page, string $url_pattern): array
 {
-    $total_pages = max(1, (int) ceil($total / $per_page));
+    $total_pages  = max(1, (int) ceil($total / $per_page));
     $current_page = max(1, min($current_page, $total_pages));
 
     return [
@@ -749,10 +288,76 @@ function lumora_pagination(int $total, int $per_page, int $current_page, string 
         'total_pages'  => $total_pages,
         'has_prev'     => $current_page > 1,
         'has_next'     => $current_page < $total_pages,
-        'prev_url'     => $current_page > 1                ? sprintf($url_pattern, $current_page - 1) : null,
-        'next_url'     => $current_page < $total_pages     ? sprintf($url_pattern, $current_page + 1) : null,
+        'prev_url'     => $current_page > 1             ? sprintf($url_pattern, $current_page - 1) : null,
+        'next_url'     => $current_page < $total_pages  ? sprintf($url_pattern, $current_page + 1) : null,
         'url_pattern'  => $url_pattern,
         'start_item'   => ($current_page - 1) * $per_page + 1,
         'end_item'     => min($current_page * $per_page, $total),
     ];
 }
+
+// ── Category wrappers (delegate to GalleryService) ────────────────────────────
+
+/** @return list<array{id: int, name: string, parent_id: int, pos: int, description: string,
+ *                     thumb_image_id: int, album_count: int, subcategory_count: int, image_count: int}> */
+function get_categories(int $parent_id = 0): array          { return GalleryService::getCategories($parent_id); }
+
+/** Get a single category row, or null. */
+function get_category(int $id): ?array                       { return GalleryService::getCategory($id); }
+
+/** Get a flat list of all categories for admin dropdowns. */
+function get_all_categories_flat(): array                    { return GalleryService::getAllCategoriesFlat(); }
+
+/** Build the breadcrumb trail for a category, from root to $cat_id. */
+function get_category_breadcrumb(int $cat_id): array         { return GalleryService::getCategoryBreadcrumb($cat_id); }
+
+/**
+ * Return combined album and image counts for a set of categories, including
+ * all descendant subcategories at any depth.
+ *
+ * @param list<int> $cat_ids
+ * @return array<int, array{album_count: int, image_count: int}>
+ */
+function get_category_subtree_counts(array $cat_ids): array  { return GalleryService::getCategorySubtreeCounts($cat_ids); }
+
+// ── Album wrappers ────────────────────────────────────────────────────────────
+
+function get_albums(int $category_id, string $sort = 'pos'): array { return GalleryService::getAlbums($category_id, $sort); }
+function get_album(int $id): ?array                                 { return GalleryService::getAlbum($id); }
+function increment_album_hits(int $album_id): void                  { GalleryService::incrementAlbumHits($album_id); }
+
+// ── Image wrappers ────────────────────────────────────────────────────────────
+
+function get_album_images(int $album_id, int $page = 1, int $per_page = 48, string $sort = 'pos'): array
+{
+    return GalleryService::getAlbumImages($album_id, $page, $per_page, $sort);
+}
+
+function count_album_images(int $album_id): int              { return GalleryService::countAlbumImages($album_id); }
+function get_image(int $id): ?array                          { return GalleryService::getImage($id); }
+function increment_image_hits(int $image_id): void           { GalleryService::incrementImageHits($image_id); }
+
+/** @return array{prev: int|null, next: int|null} */
+function get_image_neighbours(int $image_id, int $album_id, string $sort = 'pos'): array
+{
+    return GalleryService::getImageNeighbours($image_id, $album_id, $sort);
+}
+
+// ── Gallery-wide image query wrappers ─────────────────────────────────────────
+
+function get_latest_updated_albums(int $limit = 5): array    { return GalleryService::getLatestUpdatedAlbums($limit); }
+function get_most_viewed_images(int $limit = 48): array      { return GalleryService::getMostViewedImages($limit); }
+function get_latest_images(int $limit = 48): array           { return GalleryService::getLatestImages($limit); }
+function get_random_images(int $limit = 48): array           { return GalleryService::getRandomImages($limit); }
+
+// ── Stats wrappers ────────────────────────────────────────────────────────────
+
+/** @return array{categories: int, albums: int, images: int, total_hits: int} */
+function get_gallery_stats(): array                          { return GalleryService::getGalleryStats(); }
+
+// ── Visitor-tracking wrappers ─────────────────────────────────────────────────
+
+function lumora_track_visitor(): void                        { GalleryService::trackVisitor(); }
+
+/** @return array{online: int, record_count: int, record_date: string} */
+function get_online_stats(): array                           { return GalleryService::getOnlineStats(); }

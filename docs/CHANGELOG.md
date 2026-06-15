@@ -6,6 +6,201 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Coppermine Importer plugin** (`plugins/coppermine-importer/`):
+  Official migration plugin for importing Coppermine Gallery (CPG 1.4–1.6)
+  categories, albums, and image metadata into Lumora. Image files are not moved;
+  the importer is metadata-first and preserves the existing Coppermine
+  `albums/` folder structure in place.
+
+  - **`plugins/coppermine-importer/version.php`** — single source of truth for
+    the plugin version (`LUMORA_CPG_IMPORTER_VERSION = '1.0.0'`).
+    All other files reference this constant; updating the version requires
+    changing only `version.php` and `plugin.json`.
+
+  - **`plugins/coppermine-importer/plugin.json`** — plugin manifest consumed by
+    the Lumora migration hub (`admin/migrate.php`) for discovery, display, and
+    compatibility checking against `LUMORA_VERSION`.
+
+  - **`plugins/coppermine-importer/CoppermineImporter.php`** — core importer
+    class. Opens a separate PDO connection to the Coppermine database and exposes
+    three chunked import methods:
+    - `importCategories(int $last_id, int $limit, array $cat_id_map): array` —
+      keyset-paginated category import; builds a CPG `cid` → Lumora `cat_id` map
+      used to resolve parent/child relationships.
+    - `importAlbums(int $last_id, int $limit, array $cat_id_map): array` —
+      keyset-paginated album import; resolves Coppermine folder paths
+      (`keyword` field or zero-padded `aid`) to Lumora `folder` values;
+      deduplicates folder names automatically.
+    - `importImages(int $last_id, int $limit, array $album_id_map): array` —
+      keyset-paginated image import; verifies file and thumbnail presence at
+      `LUMORA_ALBUMS_PATH/{folder}/{filename}` and reports missing files without
+      blocking the DB record from being created (reconcile later with File
+      Integrity Check).
+    - `validate(): array` — tests the Coppermine DB connection and returns
+      record counts before the import begins.
+    - HTML-entity decoding via `html_entity_decode()` for CPG-encoded title and
+      description fields; `approved` normalised from ENUM('YES'/'NO') or
+      tinyint; `added` normalised from datetime or Unix timestamp int.
+
+  - **`plugins/coppermine-importer/admin/index.php`** — four-step admin wizard
+    (Credentials → Preview → Import → Done). Integrates with Lumora's admin
+    panel via `lum_admin_page()` and `lumora_require_admin()`. Stores CPG
+    credentials and accumulated ID maps in `$_SESSION['lumora_cpg_import']`;
+    session is cleared on completion or timeout (2 h). Re-import warning with
+    mandatory confirmation checkbox displayed when a prior migration record exists.
+
+  - **`plugins/coppermine-importer/admin/ajax_import.php`** — AJAX chunk
+    processor. Three actions (`import_categories`, `import_albums`,
+    `import_images`) process one keyset-paginated chunk per call; a `finish`
+    action writes the final `migration_status` record and clears the session.
+    Each call validates CSRF and admin authentication; session timeout is enforced
+    server-side (2 h). Returns JSON with per-chunk counts, errors, and a
+    `done` boolean.
+
+  - **`plugins/coppermine-importer/README.md`** — documentation covering what
+    is and is not imported, file-migration workflow, folder-name mapping table,
+    re-import protection behaviour, DB migration SQL for v5 → v6, and
+    instructions for creating future importers.
+
+- **Migration framework** (Lumora core):
+
+  - **`include/services/MigrationService.php`** — new static service class.
+    Provides import status tracking (`getMigrationStatus`, `saveMigrationStatus`,
+    `clearMigrationStatus`, `isImported`, `getAllStatuses`), migration event
+    logging (`logEvent`, `getLogs`, `clearLogs`), plugin discovery
+    (`discoverImporters` — scans `LUMORA_PLUGINS_PATH/*/plugin.json` for
+    `"type": "importer"` entries), and semantic version compatibility checking
+    (`isCompatible`). All DB calls degrade silently on pre-v6 installs.
+
+  - **`admin/migrate.php`** — new admin hub page. Discovers installed importer
+    plugins, shows each as a card with name, description, version, compatibility
+    badge, previous migration status (if any), and a **Run Importer** button.
+    Displays a migration history table when any sources have been imported.
+    Active nav key `'migrate'` highlights the **Import** sidebar item.
+
+  - **`admin/includes/admin_helpers.php`** — **Import** (📥) nav entry added
+    between Tools and Account, linking to `admin/migrate.php`.
+
+  - **`include/bootstrap.php`** — `LUMORA_PLUGINS_PATH` constant defined (step 2);
+    `MigrationService.php` loaded (step 7).
+
+  - **`install/schema.sql`** (DB version 6) — two new tables:
+    - `{PREFIX}migration_status` — one row per source platform; records
+      `source`, `imported_at`, `categories`, `albums`, `images`,
+      `plugin_version`. `PRIMARY KEY (source)` with `ON DUPLICATE KEY UPDATE`
+      for idempotent upserts.
+    - `{PREFIX}migration_log` — append-only event log written during import;
+      `level` is `'info' | 'warning' | 'error'`; keyed on `(source, level)`
+      and `(source, created_at)` for efficient filtering.
+
+  - **`version.php`** — `LUMORA_DB_VERSION` bumped from 5 to 6.
+
+### Database migration (DB v5 → v6)
+
+Run the following SQL on existing installations (replace `lum_` with your
+actual table prefix):
+
+```sql
+CREATE TABLE IF NOT EXISTS `lum_migration_status` (
+  `source`         varchar(64)  NOT NULL,
+  `imported_at`    datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `categories`     int UNSIGNED NOT NULL DEFAULT 0,
+  `albums`         int UNSIGNED NOT NULL DEFAULT 0,
+  `images`         int UNSIGNED NOT NULL DEFAULT 0,
+  `plugin_version` varchar(32)  NOT NULL DEFAULT '',
+  PRIMARY KEY (`source`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `lum_migration_log` (
+  `id`         bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+  `source`     varchar(64)     NOT NULL,
+  `level`      varchar(16)     NOT NULL DEFAULT 'info',
+  `message`    text            NOT NULL,
+  `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `source_level`   (`source`, `level`),
+  KEY `source_created` (`source`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+Fresh installations from `install/schema.sql` receive both tables automatically.
+
+---
+
+## [1.5.0] — 2026-06-15
+
+### Security
+
+- **Replace GET-based CSRF token on config export** (`admin/config.php`):
+  The export download previously embedded the CSRF token in the URL as a query
+  parameter (`?export=1&csrf_token=...`), which risks leaking the token via the
+  `Referer` header and exposes it in browser history and server logs. Replaced the
+  anchor link with a minimal POST form (`action="export"`); the token travels in the
+  request body only and validation is handled by the existing `lumora_csrf_validate()`
+  call at the top of the POST block.
+
+### Changed
+
+- **Migrate business logic from **free functions to service classes****
+  (`include/services/LumoraConfig.php`, `include/services/GalleryService.php`,
+  `include/services/ThumbnailService.php`, `include/services/ThemeRenderer.php`,
+  `include/bootstrap.php`, `include/functions.php`, `include/template.php`,
+  `include/thumb.php`):
+  Introduces four focused static service classes in `include/services/`, resolving
+  the V1 technical-debt item that flagged free functions and a global config variable
+  as architectural weaknesses.
+
+  - **`LumoraConfig`** — replaces the module-level `$LUMORA_CONFIG` global with a
+    static private cache. `load()`, `get()`, and `set()` are the sole access points.
+    Eliminates the `global $LUMORA_CONFIG` pattern from every call site inside the
+    service layer.
+
+  - **`GalleryService`** — collects all category, album, image, stats, and
+    visitor-tracking queries that were previously scattered as free functions in
+    `include/functions.php`. Method naming follows camelCase convention:
+    `getCategories()`, `getAlbum()`, `getAlbumImages()`, `getGalleryStats()`,
+    `trackVisitor()`, `getOnlineStats()`, etc.
+
+  - **`ThumbnailService`** — collects all thumbnail generation, original-image
+    resizing, metadata reading, extension validation, folder scanning, and
+    batch-add logic from `include/thumb.php`. The Imagick and GD engines become
+    `private static` methods; only `generateThumb()` is part of the public API.
+
+  - **`ThemeRenderer`** — collects all HTML-generation functions from
+    `include/template.php`, including `renderPage()`, `renderThumbgrid()`,
+    `renderCatgrid()`, `renderCatlist()`, `renderBreadcrumb()`, `renderStats()`,
+    `renderWhoIsOnline()`, `renderLightboxJs()`, and related helpers.
+    `loadCustomFile()` becomes `private static` since it is an internal detail of
+    the header/footer loading path.
+
+  **Transition strategy — full backward compatibility preserved:** The original
+  `include/functions.php`, `include/template.php`, and `include/thumb.php` are
+  retained as thin forwarding-wrapper files. Every existing free function is kept
+  as a one-liner that delegates to the corresponding service method. No caller
+  (public pages, admin pages, AJAX handlers, or the installer) required any change.
+  New V2 code can call the service classes directly.
+
+  **Bootstrap load order updated** (`include/bootstrap.php`): the four service
+  class files are now required immediately after `db.php` (step 7), before the
+  legacy include files (steps 8–11). PHP class definitions are parsed at require
+  time; no service method is invoked before all includes are loaded, so
+  forward-references to free functions defined later are safe.
+
+  **Utility free functions retained as-is** in `include/functions.php`: `h()`,
+  `lumora_redirect()`, `lumora_int()`, `lumora_base_url()`, `lumora_album_path()`,
+  `lumora_album_url()`, `lumora_active_theme()`, `lumora_theme_url()`,
+  `lumora_theme_path()`, `lumora_list_themes()`, `lumora_format_bytes()`,
+  `lumora_generate_folder()`, `lumora_sanitize_folder()`, `image_original_url()`,
+  `image_thumb_url()`, `image_original_path()`, `image_thumb_path()`,
+  `lumora_pagination()`, and `lumora_log()` have no class-level benefit and remain
+  as global utility functions.
+
+---
+
 ## [1.0.0] — 2026-06-13
 
 ### Fixed

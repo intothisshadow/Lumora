@@ -85,6 +85,7 @@ function lum_admin_page(string $title, string $content, string $active = ''): ne
         'images'      => ['icon' => '📸', 'label' => 'Images',        'url' => 'images.php'],
         'config'      => ['icon' => '⚙️', 'label' => 'Configuration', 'url' => 'config.php'],
         'tools'       => ['icon' => '🔧', 'label' => 'Tools',         'url' => 'tools.php'],
+        'migrate'     => ['icon' => '📥', 'label' => 'Import',        'url' => 'migrate.php'],
         'account'     => ['icon' => '👤', 'label' => 'Account',       'url' => 'account.php'],
     ];
 

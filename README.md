@@ -59,14 +59,19 @@ Lumora/
 │   ├── login.php / logout.php
 │   └── admin.css
 ├── albums/                     Image storage — original + thumb_* thumbnails
-├── docs/                       CHANGELOG.md, TROUBLESHOOTING.md
+├── docs/                       CHANGELOG.md, HISTORY.md
 ├── include/                    Core PHP includes
+│   ├── services/               Static service classes (business logic layer)
+│   │   ├── LumoraConfig.php    Config cache — load(), get(), set()
+│   │   ├── GalleryService.php  Category, album, image, stats, visitor-tracking queries
+│   │   ├── ThumbnailService.php Thumbnail generation, resizing, metadata, batch-add
+│   │   └── ThemeRenderer.php   All HTML output: pages, grids, breadcrumbs, lightbox
 │   ├── bootstrap.php           Load order, constants
 │   ├── db.php                  PDO singleton (LumoraDB)
-│   ├── functions.php           Config cache, CRUD helpers, pagination
+│   ├── functions.php           Utility helpers and legacy forwarding wrappers
 │   ├── auth.php                Login, CSRF, session, password management
-│   ├── thumb.php               Thumbnail generation, batch-add logic
-│   └── template.php            Page rendering, thumbgrid, lightbox
+│   ├── thumb.php               Legacy forwarding wrapper → ThumbnailService
+│   └── template.php            Legacy forwarding wrapper → ThemeRenderer
 ├── install/                    Web-based installer (delete after use)
 │   ├── index.php
 │   └── schema.sql
@@ -123,8 +128,8 @@ migration straightforward — point Lumora at the same `albums/` directory and r
 ## Features
 
 ### Public gallery
-- Home page with gallery stats, root categories, and latest images
-- Category and album browsing
+- Home page: recently updated albums, root category grid, gallery stats, and a Who Is Online strip
+- Category and album browsing with selectable layout (card grid or Coppermine-style list with recursive album and image counts)
 - Album view with sortable thumbnails (position, newest, oldest, most viewed, filename)
 - Pagination (configurable images per page)
 - Full-image lightbox via [PhotoSwipe 5](https://photoswipe.com/) (ESM, no global namespace)
@@ -174,6 +179,7 @@ All settings are managed in **Admin → Configuration**. Key options:
 | `theme` | default | Active theme folder name |
 | `thumb_width` / `thumb_height` | 250 | Max thumbnail dimensions (px) |
 | `per_page` | 48 | Thumbnails per page |
+| `category_layout` | grid | Category browser layout: `grid` (card grid) or `list` (row-based with recursive album and image counts) |
 | `allowed_extensions` | jpg,jpeg,png,gif,webp | Accepted image types for Batch Add |
 | `custom_header_path` | — | Path to a custom HTML header file (relative to Lumora root) |
 | `custom_footer_path` | — | Path to a custom HTML footer file |
@@ -186,9 +192,10 @@ All settings are managed in **Admin → Configuration**. Key options:
 | `log_mode` | off | Logging: `off`, `errors` (PHP error log), or `all` (error log + DB) |
 | `gallery_offline` | 0 | Maintenance mode — shows HTTP 503 to non-admins when `1` |
 | `latest_albums_count` | 5 | Number of recently updated albums shown on the home page; `0` = hide section |
+| `who_is_online_duration` | 5 | Visitor window in minutes for the Who Is Online strip (1–60); `0` = disable tracking |
 | `show_powered_by` | 1 | Show a "Powered by Lumora Gallery" credit in the footer (`0` = hidden); uses `{POWERED_BY}` theme token |
 
-Settings are stored in the `{PREFIX}config` database table and cached in `$LUMORA_CONFIG` per request.
+Settings are stored in the `{PREFIX}config` database table and cached by the `LumoraConfig` static class per request.
 
 The image processor (Imagick or GD) is detected automatically at runtime and shown as a read-only status in Admin → Configuration. No path or binary configuration is required.
 

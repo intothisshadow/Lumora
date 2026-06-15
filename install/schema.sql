@@ -196,3 +196,45 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}online` (
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Active visitor tracking for Who Is Online (DB version 5)';
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- migration_status  (DB version 6)
+-- ──────────────────────────────────────────────────────────────────────────────
+-- One row per source platform; records the outcome of a completed import.
+-- source:         Short identifier for the originating platform ('coppermine', …).
+-- imported_at:    Timestamp of the most recent completed import.
+-- categories/albums/images: Record counts imported.
+-- plugin_version: Version of the importer plugin that performed the import.
+-- ──────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `{PREFIX}migration_status` (
+  `source`         varchar(64)  NOT NULL,
+  `imported_at`    datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `categories`     int UNSIGNED NOT NULL DEFAULT 0,
+  `albums`         int UNSIGNED NOT NULL DEFAULT 0,
+  `images`         int UNSIGNED NOT NULL DEFAULT 0,
+  `plugin_version` varchar(32)  NOT NULL DEFAULT '',
+  PRIMARY KEY (`source`)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Records completed gallery migration status per source platform (DB version 6)';
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- migration_log  (DB version 6)
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Append-only event log written by importer plugins during and after import.
+-- level: 'info' | 'warning' | 'error'
+-- ──────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `{PREFIX}migration_log` (
+  `id`         bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+  `source`     varchar(64)     NOT NULL,
+  `level`      varchar(16)     NOT NULL DEFAULT 'info',
+  `message`    text            NOT NULL,
+  `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `source_level`   (`source`, `level`),
+  KEY `source_created` (`source`, `created_at`)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Migration event log written by importer plugins (DB version 6)';

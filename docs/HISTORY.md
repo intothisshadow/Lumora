@@ -4,6 +4,29 @@ Long-term archive of completed work, migrated from TODO.md on release.
 
 ---
 
+## v1.5.0 — Released 2026-06-15
+
+### Technical Debt (V1 → V2 Prerequisites)
+
+- [x] **0.1 Migrate business logic from free functions to service classes** — Introduced
+  `GalleryService`, `ThemeRenderer`, `ThumbnailService`, and `LumoraConfig` in
+  `include/services/`. Legacy free functions retained as thin forwarding wrappers;
+  no callers required changes. Bootstrap load order updated to require service classes
+  before the legacy include files.
+
+- [x] **0.2 Replace global `$LUMORA_CONFIG` with a config service class** — `LumoraConfig`
+  static class (private `$cache` array, `load()`, `get()`, `set()`) replaces the
+  module-level global. `lumora_config()` and `lumora_set_config()` forwarding wrappers
+  preserved for backward compatibility.
+
+- [x] **0.3 Replace GET-based CSRF token on config export** — Config export anchor link
+  (`?export=1&csrf_token=...`) replaced with a POST form (`action="export"`). CSRF
+  token now travels in the request body only; validation delegated to the existing
+  `lumora_csrf_validate()` call at the top of the POST block. Token no longer appears
+  in browser history, server logs, or `Referer` headers.
+
+
+
 ## v1.0.0 — Released 2026-06-13
 
 ### Maintenance
@@ -230,3 +253,6 @@ Long-term archive of completed work, migrated from TODO.md on release.
 - [x] Ensure visual consistency within each theme using existing theme variables, colors, spacing, typography, borders, and component styles.
 - [x] Verify that switching themes does not break the new layout.
 - [x] The layout option is available and functions identically regardless of the active theme.
+
+---
+

@@ -14,14 +14,15 @@ declare(strict_types=1);
  *   4. config.php existence check / redirect to installer
  *   5. config.php  (DB credentials + LUMORA_INSTALLED)
  *   6. db.php      (connects immediately)
- *   7. functions.php
- *   8. auth.php
- *   9. thumb.php
- *  10. template.php
- *  11. PHP session start
- * 11a. Remember-me auto-login (persistent cookie re-authentication)
- *  12. Gallery config loaded from DB into $LUMORA_CONFIG
- *  13. Timezone applied from config
+ *   7. Service classes: LumoraConfig, GalleryService, ThumbnailService, ThemeRenderer
+ *   8. functions.php  (utility helpers + legacy forwarding wrappers)
+ *   9. auth.php
+ *  10. thumb.php     (legacy forwarding wrappers → ThumbnailService)
+ *  11. template.php  (legacy forwarding wrappers → ThemeRenderer)
+ *  12. PHP session start
+ * 12a. Remember-me auto-login (persistent cookie re-authentication)
+ *  13. Gallery config loaded from DB via LumoraConfig::load()
+ *  14. Timezone applied from config
  *
  * @copyright Copyright (C) 2025 Ariane
  * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
@@ -43,6 +44,7 @@ define('LUMORA_INCLUDE',     __DIR__          . DIRECTORY_SEPARATOR);
 define('LUMORA_ALBUMS_PATH', LUMORA_ROOT . 'albums'  . DIRECTORY_SEPARATOR);
 define('LUMORA_THEMES_PATH', LUMORA_ROOT . 'themes'  . DIRECTORY_SEPARATOR);
 define('LUMORA_ADMIN_PATH',  LUMORA_ROOT . 'admin'   . DIRECTORY_SEPARATOR);
+define('LUMORA_PLUGINS_PATH', LUMORA_ROOT . 'plugins' . DIRECTORY_SEPARATOR);
 
 /** Coppermine-compatible thumbnail prefix. */
 define('LUMORA_THUMB_PREFIX', 'thumb_');
@@ -85,13 +87,24 @@ try {
     exit('Database connection failed. Please check your config.php settings.');
 }
 
-// ── 7–10. Includes ───────────────────────────────────────────────────────────
+// ── 7. Service classes ───────────────────────────────────────────────────────
+// Loaded before the legacy include files so the forwarding wrappers in steps
+// 8–11 can delegate to these classes immediately on first call.
+// Class definitions are parsed here; no method is invoked until after all
+// includes are loaded, so forward-references to free functions are safe.
+require_once LUMORA_INCLUDE . 'services/LumoraConfig.php';
+require_once LUMORA_INCLUDE . 'services/GalleryService.php';
+require_once LUMORA_INCLUDE . 'services/ThumbnailService.php';
+require_once LUMORA_INCLUDE . 'services/ThemeRenderer.php';
+require_once LUMORA_INCLUDE . 'services/MigrationService.php';
+
+// ── 8–11. Legacy includes (wrappers + utilities) ─────────────────────────────
 require_once LUMORA_INCLUDE . 'functions.php';
 require_once LUMORA_INCLUDE . 'auth.php';
 require_once LUMORA_INCLUDE . 'thumb.php';
 require_once LUMORA_INCLUDE . 'template.php';
 
-// ── 11. Session ──────────────────────────────────────────────────────────────
+// ── 12. Session ──────────────────────────────────────────────────────────────
 if (session_status() === PHP_SESSION_NONE) {
     // Harden session cookie settings.
     session_set_cookie_params([
@@ -104,19 +117,19 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// ── 11a. Remember-me auto-login ─────────────────────────────────────────────
+// ── 12a. Remember-me auto-login ──────────────────────────────────────────────
 // If no active admin session exists, attempt to re-authenticate transparently
 // via a persistent remember-me cookie (30-day split-token scheme).
-// This must run after session_start() and after auth.php is loaded (step 8),
+// This must run after session_start() and after auth.php is loaded (step 9),
 // but before any page-level lumora_require_admin() call can redirect to login.
 if (!lumora_is_logged_in()) {
     lumora_check_remember_cookie();
 }
 
-// ── 12. Gallery config ───────────────────────────────────────────────────────
+// ── 13. Gallery config ───────────────────────────────────────────────────────
 lumora_load_config();
 
-// ── 13. Timezone ─────────────────────────────────────────────────────────────
+// ── 14. Timezone ─────────────────────────────────────────────────────────────
 // Apply the timezone stored in config (default UTC).
 // Validate against the known list before calling date_default_timezone_set()
 // so that unknown identifiers fall back to UTC cleanly without the @ operator.

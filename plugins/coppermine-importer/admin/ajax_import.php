@@ -1,0 +1,215 @@
+<?php
+declare(strict_types=1);
+/**
+ * Coppermine Importer — AJAX Import Handler
+ *
+ * Processes one chunk per call. All state (credentials, ID maps, progress
+ * counters) is stored in $_SESSION['lumora_cpg_import'].
+ *
+ * Expected POST fields:
+ *   action      — 'import_categories' | 'import_albums' | 'import_images' | 'finish'
+ *   csrf_token  — Standard Lumora CSRF token
+ *
+ * Returns JSON.
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
+ */
+
+define('LUMORA_ENTRY', true);
+
+$_lumora_root = dirname(dirname(dirname(__DIR__)));
+require_once $_lumora_root . '/include/bootstrap.php';
+require_once dirname(__DIR__) . '/version.php';
+require_once dirname(__DIR__) . '/CoppermineImporter.php';
+
+lumora_require_admin();
+
+// ── JSON output helpers ───────────────────────────────────────────────────────
+
+header('Content-Type: application/json; charset=utf-8');
+
+function cpg_json_ok(array $data): never
+{
+    echo json_encode(array_merge(['ok' => true], $data), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function cpg_json_error(string $message, int $http = 400): never
+{
+    http_response_code($http);
+    echo json_encode(['ok' => false, 'error' => $message], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// ── CSRF + session ────────────────────────────────────────────────────────────
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    cpg_json_error('POST required', 405);
+}
+
+if (!lumora_csrf_check()) {
+    cpg_json_error('CSRF token invalid', 403);
+}
+
+$sess_key = 'lumora_cpg_import';
+$sess     = &$_SESSION[$sess_key];
+
+if (!is_array($sess) || empty($sess['db_host'])) {
+    cpg_json_error('Session expired. Please restart the import.', 403);
+}
+
+// Session timeout guard: abandon sessions older than 2 hours
+if (!empty($sess['started_at']) && (time() - (int) $sess['started_at']) > 7200) {
+    unset($_SESSION[$sess_key]);
+    cpg_json_error('Import session timed out (2 h). Please restart.', 403);
+}
+
+$action = trim((string) ($_POST['action'] ?? ''));
+
+// ── Build importer ────────────────────────────────────────────────────────────
+
+$importer = new CoppermineImporter(
+    $sess['db_host'],
+    $sess['db_name'],
+    $sess['db_user'],
+    $sess['db_pass'],
+    $sess['db_prefix']
+);
+
+try {
+    $importer->connect();
+} catch (\Throwable $e) {
+    cpg_json_error('Could not connect to Coppermine database: ' . $e->getMessage(), 500);
+}
+
+// Extend PHP time limit for potentially long chunks
+set_time_limit(300);
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+
+switch ($action) {
+
+    // ── Import categories ─────────────────────────────────────────────────────
+    case 'import_categories':
+
+        $result = $importer->importCategories(
+            (int) ($sess['cat_last_id'] ?? 0),
+            LUMORA_CPG_IMPORTER_CAT_CHUNK,
+            $sess['cat_id_map'] ?? []
+        );
+
+        // Merge new ID mappings into the session map
+        $sess['cat_id_map']  = array_merge(
+            $sess['cat_id_map'] ?? [],
+            $result['id_map']   ?? []
+        );
+        $sess['cat_last_id'] = $result['last_id'];
+        $sess['imported']['categories'] = ($sess['imported']['categories'] ?? 0) + $result['imported'];
+
+        // Log errors to migration log
+        foreach (array_slice($result['errors'], 0, 20) as $err) {
+            MigrationService::logEvent(LUMORA_CPG_IMPORTER_SOURCE, MigrationService::LOG_WARNING, $err);
+        }
+
+        cpg_json_ok([
+            'imported'  => $result['imported'],
+            'skipped'   => $result['skipped'],
+            'errors'    => $result['errors'],
+            'done'      => $result['done'],
+            'last_id'   => $result['last_id'],
+            'total_imported' => $sess['imported']['categories'],
+        ]);
+
+    // ── Import albums ─────────────────────────────────────────────────────────
+    case 'import_albums':
+
+        $result = $importer->importAlbums(
+            (int) ($sess['album_last_id'] ?? 0),
+            LUMORA_CPG_IMPORTER_ALB_CHUNK,
+            $sess['cat_id_map'] ?? []
+        );
+
+        $sess['album_id_map']  = array_merge(
+            $sess['album_id_map'] ?? [],
+            $result['id_map']     ?? []
+        );
+        $sess['album_last_id'] = $result['last_id'];
+        $sess['imported']['albums'] = ($sess['imported']['albums'] ?? 0) + $result['imported'];
+
+        foreach (array_slice($result['errors'], 0, 20) as $err) {
+            MigrationService::logEvent(LUMORA_CPG_IMPORTER_SOURCE, MigrationService::LOG_WARNING, $err);
+        }
+
+        cpg_json_ok([
+            'imported'       => $result['imported'],
+            'skipped'        => $result['skipped'],
+            'errors'         => $result['errors'],
+            'done'           => $result['done'],
+            'last_id'        => $result['last_id'],
+            'total_imported' => $sess['imported']['albums'],
+        ]);
+
+    // ── Import images ─────────────────────────────────────────────────────────
+    case 'import_images':
+
+        $result = $importer->importImages(
+            (int) ($sess['img_last_id'] ?? 0),
+            LUMORA_CPG_IMPORTER_IMG_CHUNK,
+            $sess['album_id_map'] ?? []
+        );
+
+        $sess['img_last_id'] = $result['last_id'];
+        $sess['imported']['images'] = ($sess['imported']['images'] ?? 0) + $result['imported'];
+
+        // Log file-missing errors at warning level; other errors at error level
+        foreach (array_slice($result['errors'], 0, 20) as $err) {
+            $level = str_contains($err, 'not found')
+                ? MigrationService::LOG_WARNING
+                : MigrationService::LOG_ERROR;
+            MigrationService::logEvent(LUMORA_CPG_IMPORTER_SOURCE, $level, $err);
+        }
+
+        cpg_json_ok([
+            'imported'       => $result['imported'],
+            'skipped'        => $result['skipped'],
+            'missing_files'  => $result['missing_files'],
+            'errors'         => $result['errors'],
+            'done'           => $result['done'],
+            'last_id'        => $result['last_id'],
+            'total_imported' => $sess['imported']['images'],
+        ]);
+
+    // ── Finish ────────────────────────────────────────────────────────────────
+    case 'finish':
+
+        $imported = $sess['imported'] ?? ['categories' => 0, 'albums' => 0, 'images' => 0];
+
+        // Record migration status
+        MigrationService::saveMigrationStatus(
+            LUMORA_CPG_IMPORTER_SOURCE,
+            $imported,
+            LUMORA_CPG_IMPORTER_VERSION
+        );
+
+        // Write summary log entry
+        MigrationService::logEvent(
+            LUMORA_CPG_IMPORTER_SOURCE,
+            MigrationService::LOG_INFO,
+            sprintf(
+                'Import completed: %d categories, %d albums, %d images (plugin v%s)',
+                $imported['categories'],
+                $imported['albums'],
+                $imported['images'],
+                LUMORA_CPG_IMPORTER_VERSION
+            )
+        );
+
+        // Clear sensitive session data
+        unset($_SESSION[$sess_key]);
+
+        cpg_json_ok(['imported' => $imported]);
+
+    default:
+        cpg_json_error("Unknown action: {$action}", 400);
+}
