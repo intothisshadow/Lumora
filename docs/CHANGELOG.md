@@ -6,7 +6,130 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
+## [1.6.0] — 2026-06-15
+
+### Added
+
+- **Coppermine Importer — Stop Import button** (`plugins/coppermine-importer/admin/index.php`):
+  Step 3 (Import Progress) now shows a ⏹ **Stop Import** button below the log
+  panel. Clicking it sets a client-side `stopped` flag; the current in-flight
+  AJAX batch is allowed to complete normally, then the loop halts instead of
+  scheduling the next chunk. The button disables itself with a “Stopping after
+  current batch…” label so the user knows the stop is pending. When the loop
+  actually halts, the result panel shows a warning explaining that partial data
+  was written and linking to the relevant admin pages for cleanup. The stop
+  controls are hidden automatically on both clean completion and on error.
+
+### Fixed
+
+- **Album cards missing view count** (`include/services/ThemeRenderer.php`):
+  Album cards rendered by `renderCatgrid()` displayed the image count but omitted
+  the album view count. The `hits` column was already present in every album row
+  (from `SELECT a.*` in `GalleryService::getAlbums()` and
+  `getLatestUpdatedAlbums()`), so the fix is purely in the renderer: after
+  computing the image-count string, two lines now derive `$views_str` from
+  `$item['hits']` and append it with an em-dash separator, e.g.
+  "42 images — 1,204 views". This affects all surfaces that call
+  `renderCatgrid()` with `'album'`: the home-page "Recently Updated" strip,
+  category album listings, and any future callers.
+
+- **Coppermine Importer — album folder names used `cpg_albums.keyword` instead of actual on-disk path** (`CoppermineImporter.php`):
+  `importAlbums()` derived each Lumora album folder name from the `keyword`
+  column of `cpg_albums`, which may be empty or differ from the physical
+  directory layout — especially on CPG installations where albums were created
+  without an explicit keyword or were moved on disk. The correct source of
+  truth is `cpg_pictures.filepath`, which CPG writes to every image row and
+  which always reflects the actual folder path used on disk (e.g.
+  `Season1/Screencaps/1x01-TheHedgeKnight`), preserving arbitrarily deep
+  sub-directory trees. Fixed by adding `fetchCpgAlbumFilepaths()`, which runs
+  one `SELECT aid, MIN(filepath) … GROUP BY aid` against `cpg_pictures` for
+  every album chunk. The result is used as the primary folder source; albums
+  with no images yet fall back to the previous `keyword`-based logic via
+  `resolveCpgAlbumFolder()`. The method wraps its query in try-catch so
+  installations without a `filepath` column degrade gracefully.
+
+- **`plugins/coppermine-importer/CoppermineImporter.php` — image import failed with "Unknown column" on CPG installations with non-standard or incomplete schemas**:
+  CPG databases upgraded in-place over many years often differ from the canonical
+  schema, even when the application version is recent (confirmed on CPG 1.6.29).
+  Two classes of column name variation were found and handled:
+  - **`pwidth`/`pheight` instead of `width`/`height`**: this CPG 1.6.29 install
+    stores image dimensions under `pwidth` and `pheight`.
+  - **`ctime` instead of `added`**: creation timestamp stored as `ctime` rather
+    than the standard `added` column name.
+  - **`width`/`height`/`pos`/`caption` entirely absent**: columns added in later
+    CPG versions that may simply not exist after an incomplete upgrade.
+  `importImages()` previously built a fixed SELECT; any missing or renamed column
+  caused `PDO::prepare()` to throw `PDOException[42S22]` immediately. Fixed by
+  adding `getPictureColumns()` (queries `INFORMATION_SCHEMA.COLUMNS` once per
+  request, cached on the instance) and building the SELECT dynamically. Renamed
+  columns are aliased with SQL `AS` so the foreach always reads `$row['width']`,
+  `$row['height']`, and `$row['added']` regardless of the actual column name;
+  entirely absent columns fall back to `0` / `''` via the existing `?? 0` / `??''`
+  expressions already in the foreach.
+
+- **`plugins/coppermine-importer/admin/ajax_import.php` + `CoppermineImporter.php` — albums skipped, images HTTP 500 during first production import**:
+  Three bugs manifested together:
+  1. **`array_merge()` destroys integer keys** (`ajax_import.php`): The session
+     `cat_id_map` and `album_id_map` were merged using `array_merge()`, which
+     re-indexes integer keys. `array_merge([1=>X, 2=>Y], [3=>Z])` produces
+     `[0=>X, 1=>Y, 2=>Z]` instead of `[1=>X, 2=>Y, 3=>Z]`. As a result, album
+     lookups by CPG category cid all hit the wrong Lumora category (off by one),
+     and any lookup for the highest cid returned null (skipped). Fixed by using
+     the `+` operator, which preserves integer keys.
+  2. **`filepath` column selected but never used** (`CoppermineImporter.php`):
+     `importImages()` included `filepath` in its `SELECT` from `cpg_pictures`,
+     but `$row['filepath']` is never referenced anywhere in the foreach loop —
+     the album folder is resolved through `$folder_map` instead. If the CPG
+     installation does not have a `filepath` column on the pictures table (some
+     versions differ), `PDO::prepare()` throws an uncaught `PDOException`,
+     producing a blank HTTP 500 with no body. Fixed by removing `filepath` from
+     the SELECT.
+  3. **No try-catch around importer calls** (`ajax_import.php`): Any uncaught
+     exception from an importer method produced a raw HTTP 500 with an empty
+     body, showing only "HTTP 500:" in the progress UI with no diagnostic
+     message. Fixed by wrapping the entire action switch in `try { … }
+     catch (\Throwable $e) { cpg_json_error(…) }` so errors are always
+     surfaced as readable JSON.
+
+- **`install/index.php` — schema setup failed on first installation**:
+  `ins_run_schema()` split the schema SQL on bare semicolons using `explode(';', ...)`,
+  which broke when encountering the semicolon inside the column comment
+  `COMMENT 'FK to images.id; 0 = auto-pick first album image'` in the `categories`
+  table. MariaDB received a truncated, syntactically invalid statement and returned
+  error 1064. Fixed by replacing the naive splitter with a new `ins_split_sql()`
+  helper that walks the SQL character-by-character as a state machine, tracking
+  single-quoted strings, double-quoted strings, and backtick-quoted identifiers so
+  that semicolons inside string literals are never treated as statement delimiters.
+
+- **`plugins/coppermine-importer/admin/index.php` — "Start Import" redirected to migration hub instead of starting the import**:
+  The step-2 Cancel button was rendered as a `<form>` nested inside the Start Import
+  `<form>`. Browsers discard nested `<form>` tags but keep their child elements,
+  so both `<input type="hidden" name="action">` fields (values `start_import` and
+  `cancel`) ended up in the same outer form. PHP's `$_POST` retains the last
+  occurrence of a duplicate key, so every click of "Start Import" actually posted
+  `action=cancel`, clearing the session and redirecting to `admin/migrate.php`.
+  The `{$reimport_check}` block (re-import confirmation checkbox) was also placed
+  outside the form, meaning it would never be submitted. Fixed by moving the
+  checkbox inside the Start Import form and separating the Cancel action into a
+  sibling `<form id="cpg-cancel-form">` whose empty body does not affect layout;
+  the Cancel button uses the HTML5 `form="cpg-cancel-form"` attribute to submit
+  that form instead.
+
+- **`plugins/coppermine-importer/admin/index.php` — blank page on first visit**:
+  Two bugs caused a blank page when loading the plugin for the first time.
+  1. **PHP heredoc parse error** (step-3 block): `{$n_cat.replace(',','')}` in a
+     heredoc is invalid PHP variable interpolation — `.replace()` is a JavaScript
+     method, not a PHP operator. PHP parses the entire file before executing any
+     code, so the syntax error in the (unreachable on step 1) case-3 block killed
+     the page for all steps. Fixed by pre-computing raw integer variables
+     (`$n_cat_int`, `$n_alb_int`, `$n_img_int`) in PHP and interpolating those
+     directly into the `var TOTAL = {...}` JavaScript literal.
+  2. **Undefined function `lumora_csrf_check()`** (`ajax_import.php`): The CSRF
+     helper in `include/auth.php` is `lumora_csrf_validate()` (which exits with
+     plain text on failure), not `lumora_csrf_check()`. The AJAX handler needs to
+     return JSON on CSRF failure, so the call is replaced with an inline boolean
+     check using `hash_equals(lumora_csrf_token(), $_POST['csrf_token'])` followed
+     by `cpg_json_error(..., 403)`.
 
 ### Added
 
