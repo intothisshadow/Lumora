@@ -13,5 +13,5 @@ declare(strict_types=1);
 
 define('LUMORA_VERSION',        '1.7.0');
 define('LUMORA_VERSION_STATUS', 'stable');
-define('LUMORA_DB_VERSION',     6);
+define('LUMORA_DB_VERSION',     7);
 define('LUMORA_MIN_PHP',        '8.2.0');

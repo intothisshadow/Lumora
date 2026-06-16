@@ -59,6 +59,8 @@ Lumora/
 │   ├── migrate.php             Migration hub — discovers and launches importer plugins
 │   ├── tools.php               Admin tools (File Integrity Check, Reload Dimensions, Regenerate Thumbnails)
 │   ├── update.php              Update checker — version status and manual check
+│   ├── forgot_password.php  Password recovery — generates a reset link to lumora_recovery.txt
+│   ├── reset_password.php   Password reset — validates token, sets new password
 │   ├── login.php / logout.php
 │   └── admin.css
 ├── albums/                     Image storage — original + thumb_* thumbnails
@@ -152,7 +154,7 @@ migration straightforward — point Lumora at the same `albums/` directory and r
   - **File Integrity Check** — verifies both the original file and thumbnail exist on disk for every image record; runs in 500-image AJAX chunks (handles 500 000+ images); missing files listed in a results table with checkboxes; bulk-delete orphaned DB records in one click (disk files are never touched)
   - **Reload Dimensions** — re-reads pixel dimensions and file sizes from disk and updates the database; runs in 100-image AJAX chunks; useful after manual file operations or migrations
   - **Regenerate Thumbnails** — regenerates thumbnails via `lumora_generate_thumb()` for every image; runs in 20-image AJAX chunks; respects Imagick/GD availability
-- **Account** — update username and email address; change password with current-password verification
+- **Account** — update username and email address; change password with current-password verification; **Forgot password** link on the login page generates a secure reset link written to `lumora_recovery.txt` in the gallery root (1-hour single-use token, email attempted if address is set)
 
 ### Themes
 Themes live in `themes/{name}/` and require only `template.html`. The active theme is selected in Admin → Configuration. Multiple themes can be installed simultaneously.
@@ -228,6 +230,9 @@ A dedicated Coppermine → Lumora import tool (auto-creates categories, albums, 
   `SHA-256(validator)` in the database only; the plain value travels only in the
   browser cookie. Tokens are rotated on every use and all tokens for a user are
   revoked on explicit logout.
+- **Password recovery** uses the same split-token scheme. The reset URL is written
+  to `lumora_recovery.txt` in the gallery root — protect or delete this file after
+  use. The token expires after 1 hour and is single-use.
 
 ---
 

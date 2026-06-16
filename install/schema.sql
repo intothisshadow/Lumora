@@ -1,19 +1,49 @@
 -- Lumora Gallery — Database Schema
--- Version: 5
+-- Version: 7
 -- Requires: MySQL 5.7+ / MariaDB 10.3+
 -- Charset: utf8mb4 / utf8mb4_unicode_ci
 --
 -- {PREFIX} is replaced by the installer with the configured table prefix (default: lum_).
 --
 -- Tables:
---   {PREFIX}config           — gallery-wide key/value settings
---   {PREFIX}users            — admin account (V1 single-user, expandable)
---   {PREFIX}categories       — nested category tree (parent_id = 0 for root)
---   {PREFIX}albums           — albums; each maps to a sub-folder of albums/
---   {PREFIX}images           — individual images with dimensions and view counter
---   {PREFIX}log              — activity log (used when log_mode = 'all'; DB version 2)
---   {PREFIX}remember_tokens  — persistent remember-me split tokens (DB version 3)
---   {PREFIX}online           — active visitor tracking for Who Is Online (DB version 5)
+--   {PREFIX}config                  — gallery-wide key/value settings
+--   {PREFIX}users                   — admin account (V1 single-user, expandable)
+--   {PREFIX}categories              — nested category tree (parent_id = 0 for root)
+--   {PREFIX}albums                  — albums; each maps to a sub-folder of albums/
+--   {PREFIX}images                  — individual images with dimensions and view counter
+--   {PREFIX}log                     — activity log (used when log_mode = 'all'; DB version 2)
+--   {PREFIX}remember_tokens         — persistent remember-me split tokens (DB version 3)
+--   {PREFIX}online                  — active visitor tracking for Who Is Online (DB version 5)
+--   {PREFIX}migration_status        — completed import records per source platform (DB version 6)
+--   {PREFIX}migration_log           — import event log written by importer plugins (DB version 6)
+--   {PREFIX}password_reset_tokens   — single-use admin password-reset tokens (DB version 7)
+--
+-- Migration from DB version 6:
+--   Run the CREATE TABLE statement for {PREFIX}password_reset_tokens below
+--   (with your actual prefix):
+--
+--     CREATE TABLE IF NOT EXISTS `lum_password_reset_tokens` (
+--       `id`               bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+--       `user_id`          int UNSIGNED    NOT NULL,
+--       `selector`         varchar(32)     NOT NULL,
+--       `hashed_validator` varchar(64)     NOT NULL,
+--       `expires_at`       datetime        NOT NULL,
+--       `created_at`       datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+--       PRIMARY KEY (`id`),
+--       UNIQUE KEY `selector`  (`selector`),
+--       KEY `user_id`          (`user_id`),
+--       KEY `expires_at`       (`expires_at`)
+--     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+--
+-- Migration from DB version 5:
+--   Run the CREATE TABLE statements for {PREFIX}migration_status and
+--   {PREFIX}migration_log below (with your actual prefix). Also add the
+--   filename/title indexes to {PREFIX}images to improve admin image search
+--   performance (optional but recommended for galleries with 50 000+ images):
+--
+--     ALTER TABLE `lum_images`
+--       ADD KEY `filename` (`filename`(191)),
+--       ADD KEY `title`    (`title`(191));
 --
 -- Migration from DB version 4:
 --   Run the CREATE TABLE statement for {PREFIX}online below (with your actual prefix).
@@ -113,6 +143,12 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}albums` (
 -- filename: bare filename, e.g. "photo.jpg"
 -- Thumbnail is always LUMORA_THUMB_PREFIX + filename in the same folder.
 -- approved: 1 = visible, 0 = hidden/pending
+-- filename / title indexes: B-tree prefix indexes supporting admin image search.
+--   They speed up album-scoped LIKE queries in combination with the album_approved
+--   index. Cross-album LIKE '%term%' searches are still a full table scan; for
+--   galleries with 500 000+ images consider adding a FULLTEXT index instead:
+--     ALTER TABLE `{PREFIX}images` ADD FULLTEXT KEY `search_text` (`filename`, `title`);
+--   and switching GalleryService::searchImages() to MATCH … AGAINST boolean mode.
 -- ──────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `{PREFIX}images` (
   `id`       int UNSIGNED      NOT NULL AUTO_INCREMENT,
@@ -128,6 +164,8 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}images` (
   `added_at` datetime          NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `album_approved` (`album_id`, `approved`),
+  KEY `filename`       (`filename`(191)),
+  KEY `title`          (`title`(191)),
   KEY `hits`           (`hits`),
   KEY `added_at`       (`added_at`)
 ) ENGINE=InnoDB
@@ -238,3 +276,30 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}migration_log` (
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Migration event log written by importer plugins (DB version 6)';
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- password_reset_tokens  (DB version 7)
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Single-use admin password-reset tokens (split-token scheme, same as
+-- remember_tokens). Used by admin/forgot_password.php and
+-- admin/reset_password.php.
+-- selector:         32-char hex (16 random bytes); stored plain; used for lookup.
+-- hashed_validator: 64-char hex; SHA-256 of the 64-char validator in the URL.
+--                   Never stored in plain form.
+-- expires_at:       1 hour from creation time.
+-- ──────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `{PREFIX}password_reset_tokens` (
+  `id`               bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`          int UNSIGNED    NOT NULL,
+  `selector`         varchar(32)     NOT NULL,
+  `hashed_validator` varchar(64)     NOT NULL,
+  `expires_at`       datetime        NOT NULL,
+  `created_at`       datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `selector`  (`selector`),
+  KEY `user_id`          (`user_id`),
+  KEY `expires_at`       (`expires_at`)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Single-use admin password-reset split tokens (DB version 7)';

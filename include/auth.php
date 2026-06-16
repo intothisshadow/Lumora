@@ -16,6 +16,18 @@ declare(strict_types=1);
  * DB operations on {PREFIX}remember_tokens are wrapped in catch(\Throwable)
  * so that pre-v3 installations (table absent) are unaffected.
  *
+ * Password Reset (DB version 7):
+ *   - Same split-token scheme as remember-me.
+ *   - Tokens expire after 1 hour and are single-use.
+ *   - The reset URL is always written to lumora_recovery.txt in LUMORA_ROOT
+ *     so admins without email can retrieve it via FTP / file manager.
+ *   - If the admin account has an email address set, a best-effort send via
+ *     mail() is attempted in addition to the recovery file.
+ *   - DB operations on {PREFIX}password_reset_tokens are wrapped in
+ *     catch(\Throwable) so that pre-v7 installations (table absent) are
+ *     unaffected — lumora_create_reset_token() is the only function that
+ *     intentionally re-throws on insert failure.
+ *
  * @copyright Copyright (C) 2025 Ariane
  * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
@@ -369,4 +381,121 @@ function lumora_change_password(int $user_id, string $new_password): bool
         'id = ?',
         [$user_id]
     ) > 0;
+}
+
+// ── Password Reset ────────────────────────────────────────────────────────────
+//
+// Split-token scheme (same as remember-me):
+//   selector  — 32-char hex (16 random bytes); stored plain; used for DB lookup.
+//   validator — 64-char hex (32 random bytes); stored as SHA-256 in DB; full
+//               value travels in the reset URL only.
+// Tokens expire after 1 hour and are single-use.
+// The reset URL is written to lumora_recovery.txt in LUMORA_ROOT on every
+// request so admins without email can retrieve it via FTP or a file manager.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Create a password-reset token for $user_id.
+ *
+ * Any existing reset tokens for the user are deleted before issuing a new one
+ * (only one active token per user at a time).
+ *
+ * Throws on DB error — callers should wrap in try/catch and show an appropriate
+ * error if the {PREFIX}password_reset_tokens table does not yet exist.
+ *
+ * @return array{selector: string, validator: string, expires_at: string}
+ */
+function lumora_create_reset_token(int $user_id): array
+{
+    $selector  = bin2hex(random_bytes(16));
+    $validator = bin2hex(random_bytes(32));
+    $expires   = date('Y-m-d H:i:s', time() + 3600); // 1 hour
+
+    // Revoke any outstanding reset tokens for this user first.
+    try {
+        LumoraDB::delete('password_reset_tokens', 'user_id = ?', [$user_id]);
+    } catch (\Throwable) {
+        // Table may be absent on pre-v7 installs; the INSERT below will surface
+        // the real error to the caller.
+    }
+
+    LumoraDB::insert('password_reset_tokens', [
+        'user_id'          => $user_id,
+        'selector'         => $selector,
+        'hashed_validator' => hash('sha256', $validator),
+        'expires_at'       => $expires,
+    ]);
+
+    return ['selector' => $selector, 'validator' => $validator, 'expires_at' => $expires];
+}
+
+/**
+ * Validate a password-reset token.
+ *
+ * Checks format, selector existence, expiry, and hashed validator.
+ * Returns the user_id on success, null on any failure.
+ *
+ * Does NOT consume the token — call lumora_consume_reset_token() after the
+ * password has been successfully changed.
+ *
+ * @return int|null  User ID on success, null on failure.
+ */
+function lumora_verify_reset_token(string $selector, string $validator): ?int
+{
+    // Validate token format before hitting the DB.
+    if (
+        !preg_match('/^[0-9a-f]{32}$/', $selector) ||
+        !preg_match('/^[0-9a-f]{64}$/', $validator)
+    ) {
+        return null;
+    }
+
+    try {
+        $token = LumoraDB::fetchOne(
+            'SELECT * FROM `{PREFIX}password_reset_tokens` WHERE selector = ?',
+            [$selector]
+        );
+    } catch (\Throwable) {
+        return null;
+    }
+
+    if (!$token) {
+        return null;
+    }
+
+    // Check expiry and prune expired token.
+    if (strtotime((string) $token['expires_at']) < time()) {
+        try { LumoraDB::delete('password_reset_tokens', 'selector = ?', [$selector]); } catch (\Throwable) {}
+        return null;
+    }
+
+    // Constant-time validator check.
+    if (!hash_equals((string) $token['hashed_validator'], hash('sha256', $validator))) {
+        return null;
+    }
+
+    return (int) $token['user_id'];
+}
+
+/**
+ * Consume (delete) a specific reset token by selector.
+ * Called immediately after a successful password change.
+ * Fails silently on DB errors.
+ */
+function lumora_consume_reset_token(string $selector): void
+{
+    try {
+        LumoraDB::delete('password_reset_tokens', 'selector = ?', [$selector]);
+    } catch (\Throwable) {}
+}
+
+/**
+ * Delete all password-reset tokens for $user_id.
+ * Fails silently on pre-v7 installs where the table does not yet exist.
+ */
+function lumora_clear_reset_tokens(int $user_id): void
+{
+    try {
+        LumoraDB::delete('password_reset_tokens', 'user_id = ?', [$user_id]);
+    } catch (\Throwable) {}
 }

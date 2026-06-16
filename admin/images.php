@@ -3,7 +3,9 @@ declare(strict_types=1);
 /**
  * Lumora Gallery — Admin: Image Management
  *
- * Provides a per-album image grid with full management capabilities:
+ * Provides a per-album image grid and cross-album search with full management
+ * capabilities:
+ *   - Search images by filename or title, within one album or across all albums.
  *   - Edit image details (title, sort position, visibility).
  *   - Replace the image file while preserving the DB record and filename.
  *   - Regenerate the thumbnail for a single image (AJAX).
@@ -26,24 +28,31 @@ $action   = $_GET['action'] ?? 'list';
 $album_id = lumora_int($_GET['album'] ?? 0, 0, 0);
 $img_id   = lumora_int($_GET['id']    ?? 0, 0, 1);
 $page     = max(1, lumora_int($_GET['page'] ?? 1, 1, 1));
+$search   = trim($_GET['search'] ?? '');
 $per_page = 24;
 $base     = lumora_base_url() . 'admin/images.php';
 $base_h   = h($base);
 $csrf     = h(lumora_csrf_token());
 $csrf_js  = json_encode(lumora_csrf_token());
+$search_h = h($search);
 
 // ── POST handlers ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     lumora_csrf_validate();
-    $act      = $_POST['action'] ?? '';
-    $post_id  = lumora_int($_POST['id']       ?? 0, 0, 1);
-    $ret_alb  = lumora_int($_POST['album_id'] ?? 0, 0, 0);
-    $ret_pg   = lumora_int($_POST['page']     ?? 1, 1, 1);
-    $ret_url  = $base . ($ret_alb > 0
-        ? '?album=' . $ret_alb . ($ret_pg > 1 ? '&page=' . $ret_pg : '')
-        : '');
+    $act        = $_POST['action']   ?? '';
+    $post_id    = lumora_int($_POST['id']       ?? 0, 0, 1);
+    $ret_alb    = lumora_int($_POST['album_id'] ?? 0, 0, 0);
+    $ret_pg     = lumora_int($_POST['page']     ?? 1, 1, 1);
+    $ret_search = trim($_POST['search'] ?? '');
 
-    // ── save (edit details + optional file replacement) ────────────────────
+    // Build return URL preserving album, page, and search context.
+    $ret_parts = [];
+    if ($ret_alb    > 0) $ret_parts[] = 'album='  . $ret_alb;
+    if ($ret_pg     > 1) $ret_parts[] = 'page='   . $ret_pg;
+    if ($ret_search !== '') $ret_parts[] = 'search=' . rawurlencode($ret_search);
+    $ret_url = $base . ($ret_parts ? '?' . implode('&', $ret_parts) : '');
+
+    // ── save (edit details + optional file replacement) ──────────────────────
     if ($act === 'save' && $post_id > 0) {
         $image = LumoraDB::fetchOne(
             'SELECT i.*, a.folder FROM `{PREFIX}images` i
@@ -62,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $approved = lumora_int($_POST['approved'] ?? 0, 0, 0, 1);
         $updates  = ['title' => $title, 'pos' => $pos, 'approved' => $approved];
 
-        // ── optional file replacement ──────────────────────────────────────
+        // ── optional file replacement ────────────────────────────────────────
         $upload_error = $_FILES['new_image']['error'] ?? UPLOAD_ERR_NO_FILE;
 
         if ($upload_error === UPLOAD_ERR_OK) {
@@ -123,7 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         lumora_redirect($ret_url);
     }
 
-    // ── delete (single image) ──────────────────────────────────────────────
+    // ── delete (single image) ────────────────────────────────────────────────
     if ($act === 'delete' && $post_id > 0) {
         $image = LumoraDB::fetchOne(
             'SELECT i.id, i.filename, i.album_id, a.folder
@@ -161,7 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// ── Load album list (for album selector + bulk-move dropdown) ─────────────────
+// ── Load album list (for album selector + bulk-move dropdown) ──────────────────
 $all_albums = LumoraDB::fetchAll(
     'SELECT a.id, a.title, a.folder, c.name AS cat_name
      FROM `{PREFIX}albums` a
@@ -233,7 +242,13 @@ if ($action === 'edit') {
     }
 
     $edit_album_id = (int) $edit_image['album_id_val'];
-    $back_url_h    = h($base . '?album=' . $edit_album_id . ($page > 1 ? '&page=' . $page : ''));
+
+    // Back URL preserves the context the user came from (album + page + search).
+    $back_parts = [];
+    if ($album_id > 0)  $back_parts[] = 'album='  . $album_id;
+    if ($page     > 1)  $back_parts[] = 'page='   . $page;
+    if ($search  !== '') $back_parts[] = 'search=' . rawurlencode($search);
+    $back_url_h = h($base . ($back_parts ? '?' . implode('&', $back_parts) : ''));
 
     $thumb_url_h  = h(image_thumb_url($edit_image));
     $orig_url_h   = h(image_original_url($edit_image));
@@ -275,6 +290,7 @@ if ($action === 'edit') {
     <input type="hidden" name="id"         value="{$img_id}">
     <input type="hidden" name="album_id"   value="{$edit_album_id}">
     <input type="hidden" name="page"       value="{$page}">
+    <input type="hidden" name="search"     value="{$search_h}">
     <input type="hidden" name="csrf_token" value="{$csrf}">
 
     <div class="mb-3">
@@ -322,50 +338,107 @@ HTML;
 }
 
 // ── List view ─────────────────────────────────────────────────────────────────
+$is_search  = $search !== '';
+$album_id_h = (string) $album_id; // safe: integer cast
 
-// Album selector card (always shown).
-$content = <<<HTML
-<div class="lum-adm-card mb-3">
-  <h5 class="mb-3">Select Album</h5>
-  <form method="get" action="{$base_h}" class="d-flex gap-2 flex-wrap">
-    <select name="album" class="form-select" style="max-width:420px">{$sel_opts}</select>
-    <button type="submit" class="btn btn-outline-secondary">Open →</button>
-  </form>
-</div>
-HTML;
+// ── Combined album selector + search bar card ─────────────────────────────────
+$content = '<div class="lum-adm-card mb-3">'
+    . '<div class="d-flex flex-wrap gap-3 align-items-end">';
 
-if ($album) {
-    // ── Load images for this page ─────────────────────────────────────────
-    $total  = (int) LumoraDB::fetchValue(
-        'SELECT COUNT(*) FROM `{PREFIX}images` WHERE album_id = ?',
-        [$album_id]
-    );
-    $offset      = ($page - 1) * $per_page;
+// Album selector form: preserves the active search term when switching albums.
+$content .= '<div>'
+    . '<label class="form-label mb-1 fw-semibold small text-muted">Album</label>'
+    . '<form method="get" action="' . $base_h . '" class="d-flex gap-2 align-items-center">'
+    . '<select name="album" class="form-select" style="max-width:380px">' . $sel_opts . '</select>'
+    . '<input type="hidden" name="search" value="' . $search_h . '">'
+    . '<button type="submit" class="btn btn-outline-secondary">Open →</button>'
+    . '</form>'
+    . '</div>';
+
+// Search form: preserves the active album scope when submitting a search.
+$content .= '<div class="flex-grow-1">'
+    . '<label class="form-label mb-1 fw-semibold small text-muted">Search</label>'
+    . '<form method="get" action="' . $base_h . '" class="d-flex gap-2 align-items-center flex-wrap">'
+    . '<input type="hidden" name="album" value="' . $album_id_h . '">'
+    . '<input type="text" name="search" value="' . $search_h . '" class="form-control"'
+    . ' style="max-width:340px" placeholder="Search by filename or image name…"'
+    . ' autocomplete="off" spellcheck="false">'
+    . '<button type="submit" class="btn btn-primary">🔍 Search</button>';
+
+if ($is_search) {
+    // Clear search — return to album page (if one is selected) or bare list.
+    $clear_parts = $album_id > 0 ? ['album=' . $album_id] : [];
+    $clear_url_h = h($base . ($clear_parts ? '?' . implode('&', $clear_parts) : ''));
+    $content    .= '<a href="' . $clear_url_h . '" class="btn btn-outline-secondary" title="Clear search">✕ Clear</a>';
+}
+
+$content .= '</form></div></div></div>'; // close search form div, album flex row, card
+
+// ── Load and display images when album selected OR search is active ────────────
+$show_content = ($album !== null) || $is_search;
+
+if ($show_content) {
+
+    // ── Count total matching rows first, then compute correct page ────────────
+    if ($is_search) {
+        $total = GalleryService::countSearchImages($search, $album_id);
+    } else {
+        $total = (int) LumoraDB::fetchValue(
+            'SELECT COUNT(*) FROM `{PREFIX}images` WHERE album_id = ?',
+            [$album_id]
+        );
+    }
+
     $total_pages = max(1, (int) ceil($total / $per_page));
     $page        = max(1, min($page, $total_pages));
+    $offset      = ($page - 1) * $per_page;
 
-    $images = LumoraDB::fetchAll(
-        'SELECT i.*, a.folder
-         FROM `{PREFIX}images` i
-         JOIN `{PREFIX}albums` a ON a.id = i.album_id
-         WHERE i.album_id = ?
-         ORDER BY i.pos ASC, i.id ASC
-         LIMIT ? OFFSET ?',
-        [$album_id, $per_page, $offset]
-    );
+    // ── Fetch the current page of images ─────────────────────────────────────
+    if ($is_search) {
+        $images = GalleryService::searchImages($search, $album_id, $page, $per_page);
+    } else {
+        $images = LumoraDB::fetchAll(
+            'SELECT i.*, a.folder
+             FROM `{PREFIX}images` i
+             JOIN `{PREFIX}albums` a ON a.id = i.album_id
+             WHERE i.album_id = ?
+             ORDER BY i.pos ASC, i.id ASC
+             LIMIT ? OFFSET ?',
+            [$album_id, $per_page, $offset]
+        );
+    }
 
-    $album_title_h = h($album['title']);
-    $batch_url_h   = h(lumora_base_url() . 'admin/batch.php?album=' . $album_id);
+    // ── Closure: build a URL for a given page in the current context ──────────
+    $make_page_url = static function (int $p) use ($base, $album_id, $is_search, $search): string {
+        $parts = [];
+        if ($album_id  > 0) $parts[] = 'album='  . $album_id;
+        if ($is_search)     $parts[] = 'search=' . rawurlencode($search);
+        if ($p         > 1) $parts[] = 'page='   . $p;
+        return $base . ($parts ? '?' . implode('&', $parts) : '');
+    };
 
-    // Heading row
-    $content .= '<div class="d-flex justify-content-between align-items-center mb-3">'
-        . '<h5 class="mb-0">' . $album_title_h
-        . ' <span class="text-muted fw-normal small">('
-        . number_format($total) . ' ' . ($total === 1 ? 'image' : 'images') . ')</span></h5>'
-        . '<a href="' . $batch_url_h . '" class="btn btn-sm btn-outline-primary">⬆️ Batch Add</a>'
-        . '</div>';
+    // ── Heading row ───────────────────────────────────────────────────────────
+    if ($is_search) {
+        $ctx_label = $album
+            ? ' in <em>' . h($album['title']) . '</em>'
+            : ' across all albums';
+        $count_str = number_format($total) . ' ' . ($total === 1 ? 'image' : 'images');
+        $content  .= '<div class="d-flex justify-content-between align-items-center mb-3">'
+            . '<h5 class="mb-0">Results for &ldquo;' . $search_h . '&rdquo;' . $ctx_label
+            . ' <span class="text-muted fw-normal small">(' . $count_str . ')</span></h5>'
+            . '</div>';
+    } else {
+        $album_title_h = h($album['title']);
+        $batch_url_h   = h(lumora_base_url() . 'admin/batch.php?album=' . $album_id);
+        $content      .= '<div class="d-flex justify-content-between align-items-center mb-3">'
+            . '<h5 class="mb-0">' . $album_title_h
+            . ' <span class="text-muted fw-normal small">('
+            . number_format($total) . ' ' . ($total === 1 ? 'image' : 'images') . ')</span></h5>'
+            . '<a href="' . $batch_url_h . '" class="btn btn-sm btn-outline-primary">⬆️ Batch Add</a>'
+            . '</div>';
+    }
 
-    // Bulk actions bar
+    // ── Bulk actions bar ──────────────────────────────────────────────────────
     $content .= <<<HTML
 <div class="lum-adm-card mb-3 py-2">
   <div class="d-flex flex-wrap align-items-center gap-2">
@@ -386,10 +459,20 @@ if ($album) {
 </div>
 HTML;
 
-    // Image table
+    // ── Image table ───────────────────────────────────────────────────────────
     if (empty($images)) {
-        $content .= '<div class="alert alert-info">No images in this album yet.'
-            . ' <a href="' . $batch_url_h . '">Batch Add →</a></div>';
+        if ($is_search) {
+            $clear_parts = $album_id > 0 ? ['album=' . $album_id] : [];
+            $clear_url_h = h($base . ($clear_parts ? '?' . implode('&', $clear_parts) : ''));
+            $ctx_label   = $album ? ' in this album' : '';
+            $content    .= '<div class="alert alert-info">'
+                . 'No images found matching <strong>' . $search_h . '</strong>' . $ctx_label . '. '
+                . '<a href="' . $clear_url_h . '">Clear search</a>'
+                . '</div>';
+        } else {
+            $content .= '<div class="alert alert-info">No images in this album yet.'
+                . ' <a href="' . $batch_url_h . '">Batch Add →</a></div>';
+        }
     } else {
         $rows = '';
         foreach ($images as $img) {
@@ -407,13 +490,26 @@ HTML;
                 ? '<span class="badge bg-success">Visible</span>'
                 : '<span class="badge bg-secondary">Hidden</span>';
 
-            $img_id_v    = (int) $img['id'];
-            $edit_url_h  = h(
+            // When searching, include album (and optional category) context in the title cell.
+            $album_info_h = '';
+            if ($is_search) {
+                $cat = (string) ($img['cat_name'] ?? '');
+                $alb = (string) ($img['album_title'] ?? '');
+                $album_info_h = '<div class="text-muted" style="font-size:.73rem">'
+                    . ($cat !== '' ? h($cat) . ' › ' : '') . h($alb)
+                    . '</div>';
+            }
+
+            $img_id_v   = (int) $img['id'];
+            $row_alb_id = $is_search ? (int) $img['album_id'] : $album_id;
+
+            $edit_url_h = h(
                 $base . '?action=edit&id=' . $img_id_v
                 . '&album=' . $album_id
                 . ($page > 1 ? '&page=' . $page : '')
+                . ($is_search ? '&search=' . rawurlencode($search) : '')
             );
-            $del_conf_h  = h(
+            $del_conf_h = h(
                 "Delete '" . $img['filename'] . "'? "
                 . "The image file and its thumbnail will be permanently removed from disk."
             );
@@ -433,6 +529,7 @@ HTML;
   <td>
     <div class="fw-semibold small">{$title_h}</div>
     <div class="text-muted" style="font-size:.73rem;font-family:monospace">{$filename_h}</div>
+    {$album_info_h}
   </td>
   <td class="text-muted small text-nowrap">{$dims_h}</td>
   <td class="text-muted small text-nowrap">{$size_h}</td>
@@ -451,8 +548,9 @@ HTML;
             onsubmit="return confirm(this.dataset.confirm)">
         <input type="hidden" name="action"     value="delete">
         <input type="hidden" name="id"         value="{$img_id_v}">
-        <input type="hidden" name="album_id"   value="{$album_id}">
+        <input type="hidden" name="album_id"   value="{$row_alb_id}">
         <input type="hidden" name="page"       value="{$page}">
+        <input type="hidden" name="search"     value="{$search_h}">
         <input type="hidden" name="csrf_token" value="{$csrf}">
         <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">🗑</button>
       </form>
@@ -470,7 +568,7 @@ HTML;
             . '</th>'
             . '<th class="text-muted" style="width:50px">ID</th>'
             . '<th>Thumb</th>'
-            . '<th>Title / Filename</th>'
+            . '<th>Title / Filename' . ($is_search ? ' / Album' : '') . '</th>'
             . '<th>Dimensions</th>'
             . '<th>Size</th>'
             . '<th>Views</th>'
@@ -482,15 +580,14 @@ HTML;
             . '</table></div>';
     }
 
-    // ── Pagination ────────────────────────────────────────────────────────
+    // ── Pagination ────────────────────────────────────────────────────────────
     if ($total_pages > 1) {
         $pag_items = '';
 
         if ($total_pages <= 10) {
-            // Show all page numbers.
             for ($p = 1; $p <= $total_pages; $p++) {
                 $active    = ($p === $page) ? ' active' : '';
-                $pag_url_h = h($base . '?album=' . $album_id . '&page=' . $p);
+                $pag_url_h = h($make_page_url($p));
                 $pag_items .= '<li class="page-item' . $active . '">'
                     . '<a class="page-link" href="' . $pag_url_h . '">' . $p . '</a></li>';
             }
@@ -510,17 +607,17 @@ HTML;
                     $pag_items .= '<li class="page-item disabled"><span class="page-link">&hellip;</span></li>';
                 }
                 $active    = ($p === $page) ? ' active' : '';
-                $pag_url_h = h($base . '?album=' . $album_id . '&page=' . $p);
+                $pag_url_h = h($make_page_url($p));
                 $pag_items .= '<li class="page-item' . $active . '">'
                     . '<a class="page-link" href="' . $pag_url_h . '">' . $p . '</a></li>';
                 $prev_shown = $p;
             }
         }
 
-        $prev_dis  = $page <= 1 ? ' disabled' : '';
-        $next_dis  = $page >= $total_pages ? ' disabled' : '';
-        $prev_url_h = h($base . '?album=' . $album_id . '&page=' . ($page - 1));
-        $next_url_h = h($base . '?album=' . $album_id . '&page=' . ($page + 1));
+        $prev_dis   = $page <= 1             ? ' disabled' : '';
+        $next_dis   = $page >= $total_pages  ? ' disabled' : '';
+        $prev_url_h = h($make_page_url($page - 1));
+        $next_url_h = h($make_page_url($page + 1));
 
         $content .= '<nav class="mt-3" aria-label="Page navigation">'
             . '<ul class="pagination pagination-sm justify-content-center flex-wrap">'
@@ -534,7 +631,7 @@ HTML;
             . '</ul></nav>';
     }
 
-    // ── JavaScript ────────────────────────────────────────────────────────
+    // ── JavaScript ────────────────────────────────────────────────────────────
     $ajax_base_js = json_encode(lumora_base_url() . 'admin/');
 
     $content .= <<<HTML
@@ -724,7 +821,6 @@ HTML;
         var msg = (err && err.error) || (data && data.message) || 'Unknown error.';
 
         if (ok) {
-          // Flash green briefly to confirm success.
           btn.classList.add('btn-success');
           btn.classList.remove('btn-outline-secondary');
           setTimeout(function () {

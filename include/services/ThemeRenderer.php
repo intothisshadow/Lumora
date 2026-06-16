@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 /**
  * Lumora Gallery — Theme Renderer
@@ -134,7 +135,7 @@ HTML;
             return '';
         }
         return '<small>Powered by '
-            . '<a href="https://code.unloved-heart.net/lumora" rel="noopener">Lumora Gallery</a>'
+            . '<a href="https://code.unloved-heart.net/scripts/lumora-gallery/" rel="noopener">Lumora Gallery</a>'
             . '</small>';
     }
 

@@ -8,6 +8,156 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 
+## [Unreleased]
+
+### Added
+
+- **Admin Password Recovery** (`admin/forgot_password.php`, `admin/reset_password.php`,
+  `include/auth.php`, `admin/login.php`, `install/schema.sql`, `version.php`):
+  Admins who have lost their password can now generate a secure reset link without
+  needing SMTP configured. The feature targets self-hosted installations where email
+  delivery is not guaranteed.
+
+  **Flow:**
+  1. Admin clicks **Forgot password?** on the login page.
+  2. `admin/forgot_password.php` generates a single-use, 1-hour split-token reset URL
+     and writes it to `lumora_recovery.txt` in the gallery root — recoverable at any
+     time via FTP or a hosting file manager.
+  3. If an email address is set on the admin account, a best-effort send via PHP's
+     `mail()` function is attempted in addition to the file.
+  4. Admin opens the URL from the file, sets a new password on
+     `admin/reset_password.php`, and the token is immediately consumed.
+  5. `lumora_recovery.txt` is deleted automatically after a successful reset.
+
+  **Security design:**
+  - Split-token scheme identical to the remember-me implementation: `selector`
+    (32-char hex) stored plain for lookup; `SHA-256(validator)` stored in DB;
+    full validator travels only in the reset URL.
+  - Tokens expire after 1 hour; only one active reset token per user at a time
+    (existing tokens are revoked before a new one is issued).
+  - Tokens are single-use — consumed and deleted immediately on successful
+    password change.
+  - All remember-me tokens for the user are also revoked after a successful reset,
+    forcing a fresh login.
+  - `forgot_password.php` shows an identical success message whether or not an
+    admin account was found, to avoid disclosing account existence.
+  - `mail()` warnings are captured via a temporary error handler and routed to
+    the PHP error log only — never exposed to the browser.
+
+  **New DB table** `{PREFIX}password_reset_tokens` (DB version 7):
+
+  ```sql
+  CREATE TABLE IF NOT EXISTS `lum_password_reset_tokens` (
+    `id`               bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id`          int UNSIGNED    NOT NULL,
+    `selector`         varchar(32)     NOT NULL,
+    `hashed_validator` varchar(64)     NOT NULL,
+    `expires_at`       datetime        NOT NULL,
+    `created_at`       datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `selector`  (`selector`),
+    KEY `user_id`          (`user_id`),
+    KEY `expires_at`       (`expires_at`)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  ```
+  Replace `lum_` with your actual table prefix. Fresh installations from
+  `install/schema.sql` receive the table automatically.
+
+  **New auth functions** in `include/auth.php`:
+  - `lumora_create_reset_token(int $user_id): array` — generates and stores a
+    split-token, returns `['selector', 'validator', 'expires_at']`; throws on DB
+    error (table absent) so the caller can show a migration hint.
+  - `lumora_verify_reset_token(string $selector, string $validator): ?int` —
+    validates format, expiry, and hashed validator; returns the user_id on success
+    or null on any failure; prunes expired tokens in place.
+  - `lumora_consume_reset_token(string $selector): void` — deletes one token by
+    selector after successful password change.
+  - `lumora_clear_reset_tokens(int $user_id): void` — deletes all reset tokens for
+    a user; fails silently on pre-v7 installs.
+
+  **`admin/login.php`** — **Forgot password?** link added below the login form.
+
+  **`version.php`** — `LUMORA_DB_VERSION` bumped from 6 to 7.
+
+- **Regenerate Missing Thumbnails** (`admin/ajax_missing_thumbs.php`, `admin/tools.php`):
+  New Tool 4 on **Admin → Tools** that scans all images in scope (entire gallery
+  or a selected album) and regenerates thumbnails **only** for images where the
+  thumbnail file is missing or empty, leaving existing valid thumbnails untouched.
+
+  This complements the existing “Regenerate All Thumbnails” tool (Tool 3), which
+  unconditionally overwrites every thumbnail. Tool 4 is significantly faster when
+  only a small fraction of thumbnails are absent (e.g. after adding images manually
+  or after a partial batch-add failure).
+
+  - **`admin/ajax_missing_thumbs.php`** — new AJAX chunk handler. Uses the same
+    keyset-paginated architecture (`WHERE id > last_id`) and the same
+    `lumora_generate_thumb()` / `LUMORA_THUMB_PREFIX` pipeline as the existing
+    handlers. Before generating, it checks `is_file($thumb_path)` and
+    `filesize($thumb_path) > 0`; images whose thumbnail already passes both
+    checks are counted as `skipped` without any disk I/O or CPU work. Images
+    whose original file is absent are counted as `no_orig`. JSON response shape:
+    `{ checked, regenerated, skipped, no_orig, last_id, errors[], done }`.
+
+  - **`admin/tools.php`** — Tool 4 card and progress UI added. The button is
+    styled `btn-outline-success` (distinct from Tool 3’s `btn-primary`) and
+    carries the same `disabled` attribute as Tool 3 when no image processor is
+    available. Progress bar uses `bg-warning`. Completion summary shows either
+    “All N thumbnails are already present” or “X missing thumbnails regenerated,
+    Y already existed”. The existing three tools are unchanged.
+
+- **Admin Image Search** (`admin/images.php`, `include/services/GalleryService.php`,
+  `install/schema.sql`):
+  Administrators can now search images by filename or title directly from
+  **Admin → Images**, either within a selected album or across the entire gallery.
+
+  - **Search bar** integrated into the album selector card. A single `?search=term`
+    GET parameter controls the active query; the album scope (`?album=N`) is
+    preserved when submitting a search and vice versa. A **✕ Clear** button
+    removes the active query and returns to the current album view.
+
+  - **Scoped vs. cross-album search:** when an album is selected and a search
+    term is entered the query is limited to that album's rows (uses the existing
+    `album_approved` index, fast even at 500 K images). When no album is selected
+    the search runs across all albums — results show the category › album path
+    below each filename so images are identifiable without opening their album.
+
+  - **Result header** shows `Results for "term" in Album Title (N images)` or
+    `Results for "term" across all albums (N images)`. The column header reads
+    `Title / Filename / Album` in cross-album mode.
+
+  - **Pagination, bulk delete, bulk move, single-image edit/delete** all
+    preserve the active search term. After a save or delete the admin is
+    returned to the same search results page. `location.reload()` in the bulk
+    AJAX handlers preserves the search via the URL automatically.
+
+  - **Empty-state message** when no images match, with a **Clear search** link.
+
+  - **`GalleryService::searchImages(string $query, int $album_id, int $page,
+    int $per_page): array`** — paginated image search using prepared `LIKE`
+    statements against `filename` and `title`. Joins `albums` and `categories`
+    so results include `album_title` and `cat_name`.
+
+  - **`GalleryService::countSearchImages(string $query, int $album_id): int`** —
+    companion count method for pagination.
+
+  - **`install/schema.sql`** — two B-tree prefix indexes added to `{PREFIX}images`
+    (`filename(191)`, `title(191)`). These improve album-scoped search performance
+    in combination with the existing `album_approved` index. For very large
+    galleries (500 K+) a `FULLTEXT KEY search_text (filename, title)` can be
+    added manually; see the inline comment in `schema.sql` for the ALTER TABLE
+    statement and the corresponding switch needed in `GalleryService::searchImages`.
+
+  **Migration for existing installations** (optional, performance only — no
+  functional change):
+  ```sql
+  ALTER TABLE `lum_images`
+    ADD KEY `filename` (`filename`(191)),
+    ADD KEY `title`    (`title`(191));
+  ```
+  Replace `lum_` with your actual table prefix.
+
+---
+
 ## [1.7.0] — 2026-06-16
 
 ### Added

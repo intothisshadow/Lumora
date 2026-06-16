@@ -34,12 +34,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$base_url = h(lumora_base_url());
-$err_html = $error ? '<div class="alert alert-danger py-2">' . h($error) . '</div>' : '';
-$csrf_h   = h($csrf);
-$ver      = LUMORA_VERSION;
-$gal_name = h(lumora_config('gallery_name', 'Lumora Gallery'));
-$redir_h  = h($redirect);
+$base_url    = h(lumora_base_url());
+$err_html    = $error ? '<div class="alert alert-danger py-2">' . h($error) . '</div>' : '';
+$csrf_h      = h($csrf);
+$ver         = LUMORA_VERSION;
+$gal_name    = h(lumora_config('gallery_name', 'Lumora Gallery'));
+$redir_h     = h($redirect);
+$forgot_url  = h(lumora_base_url() . 'admin/forgot_password.php');
 
 echo <<<HTML
 <!DOCTYPE html>
@@ -82,6 +83,9 @@ echo <<<HTML
       </div>
       <button type="submit" class="btn btn-primary w-100">Log In</button>
     </form>
+    <div class="text-center mt-3">
+      <a href="{$forgot_url}" class="text-muted small">Forgot password?</a>
+    </div>
   </div>
   <div class="card-footer text-center text-muted small py-2">
     <a href="{$base_url}">← Back to gallery</a>

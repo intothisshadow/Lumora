@@ -314,6 +314,88 @@ class GalleryService
         ];
     }
 
+    // ── Admin Image Search ────────────────────────────────────────────────────
+
+    /**
+     * Search images by filename or title (admin use; any approval status).
+     *
+     * Case-insensitive partial match against both `filename` and `title`
+     * columns. Results include album title and category name so search results
+     * across multiple albums can be displayed with full context.
+     *
+     * When $album_id > 0 the search is scoped to that album; when 0 it covers
+     * all albums. For single-album searches the existing `album_approved` index
+     * limits the scan to that album's rows, keeping performance acceptable even
+     * at 500 K total images. Cross-album searches perform a full table scan on
+     * the images table; see the migration note in CHANGELOG.md for an optional
+     * FULLTEXT index that can be added on very large galleries.
+     *
+     * @param string $query    Search term; partial / multi-word; case-insensitive.
+     * @param int    $album_id Restrict to this album; 0 = all albums.
+     * @param int    $page     1-based page number.
+     * @param int    $per_page Rows per page.
+     * @return list<array{id: int, album_id: int, filename: string, title: string,
+     *                    filesize: int, width: int, height: int, hits: int,
+     *                    approved: int, pos: int, added_at: string,
+     *                    folder: string, album_title: string, cat_name: string}>
+     */
+    public static function searchImages(
+        string $query,
+        int    $album_id  = 0,
+        int    $page      = 1,
+        int    $per_page  = 24
+    ): array {
+        $like   = '%' . $query . '%';
+        $offset = max(0, ($page - 1) * $per_page);
+        $params = [$like, $like];
+
+        $where = '(i.filename LIKE ? OR i.title LIKE ?)';
+        if ($album_id > 0) {
+            $where   .= ' AND i.album_id = ?';
+            $params[] = $album_id;
+        }
+        $params[] = $per_page;
+        $params[] = $offset;
+
+        return LumoraDB::fetchAll(
+            "SELECT i.*, a.folder, a.title AS album_title,
+                    COALESCE(c.name, '') AS cat_name
+             FROM `{PREFIX}images` i
+             JOIN `{PREFIX}albums` a ON a.id = i.album_id
+             LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id
+             WHERE {$where}
+             ORDER BY a.title ASC, i.pos ASC, i.id ASC
+             LIMIT ? OFFSET ?",
+            $params
+        );
+    }
+
+    /**
+     * Count images matching a search query (admin use; any approval status).
+     *
+     * @param string $query    Search term; partial / multi-word; case-insensitive.
+     * @param int    $album_id Restrict to this album; 0 = all albums.
+     * @return int             Total matching image count.
+     */
+    public static function countSearchImages(string $query, int $album_id = 0): int
+    {
+        $like   = '%' . $query . '%';
+        $params = [$like, $like];
+
+        $where = '(i.filename LIKE ? OR i.title LIKE ?)';
+        if ($album_id > 0) {
+            $where   .= ' AND i.album_id = ?';
+            $params[] = $album_id;
+        }
+
+        return (int) LumoraDB::fetchValue(
+            "SELECT COUNT(*)
+             FROM `{PREFIX}images` i
+             WHERE {$where}",
+            $params
+        );
+    }
+
     // ── Gallery-wide image queries ────────────────────────────────────────────
 
     /**

@@ -3,17 +3,22 @@ declare(strict_types=1);
 /**
  * Lumora Gallery — Admin: Tools
  *
- * Three AJAX-driven tools, all sharing an optional album scope selector:
+ * Four AJAX-driven tools, all sharing an optional album scope selector:
  *
- *   1. File Integrity Check  — verify every DB image record has files on disk;
- *                              select and delete orphaned DB entries.
- *   2. Reload Dimensions     — re-read width/height/filesize from disk and
- *                              update the images table.
- *   3. Regenerate Thumbnails — rebuild all thumbnails from originals using
- *                              current thumbnail settings.
+ *   1. File Integrity Check         — verify every DB image record has files on disk;
+ *                                     select and delete orphaned DB entries.
+ *   2. Reload Dimensions            — re-read width/height/filesize from disk and
+ *                                     update the images table.
+ *   3. Regenerate All Thumbnails    — rebuild every thumbnail from originals using
+ *                                     current thumbnail settings (overwrites existing).
+ *   4. Regenerate Missing Thumbnails — rebuild only thumbnails that are absent or
+ *                                     empty; existing valid thumbnails are untouched.
  *
  * All tools run in AJAX chunks — safe for galleries with 500 000+ images.
  * No original image files are ever modified by any of these tools.
+ *
+ * @copyright Copyright (C) 2025 Ariane
+ * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 define('LUMORA_ENTRY', true);
 require_once dirname(__DIR__) . '/include/bootstrap.php';
@@ -200,12 +205,12 @@ $content = <<<HTML
   <div id="lum-dim-summary" class="small"></div>
 </div>
 
-<!-- ── 3. Regenerate Thumbnails ─────────────────────────────────────────────── -->
+<!-- ── 3. Regenerate All Thumbnails ────────────────────────────────────────── -->
 <div class="lum-adm-card mb-3">
-  <h5 class="mb-2">🖼 Regenerate Thumbnails</h5>
+  <h5 class="mb-2">🖼 Regenerate All Thumbnails</h5>
   {$thumb_warn_html}
   <p class="text-muted small mb-3">
-    Regenerates the thumbnail for every image in the current scope
+    Regenerates the thumbnail for <strong>every</strong> image in the current scope
     (<strong>{$total_fmt}</strong> images) using the current thumbnail settings
     (size: <strong>{$thumb_w}×{$thumb_h}&nbsp;px</strong>,
     quality: <strong>{$thumb_q}</strong>).
@@ -231,6 +236,38 @@ $content = <<<HTML
          role="progressbar" style="width:0%;font-size:.75rem">0%</div>
   </div>
   <div id="lum-thn-summary" class="small"></div>
+</div>
+
+<!-- ── 4. Regenerate Missing Thumbnails ────────────────────────────────────── -->
+<div class="lum-adm-card mb-3">
+  <h5 class="mb-2">🔎 Regenerate Missing Thumbnails</h5>
+  {$thumb_warn_html}
+  <p class="text-muted small mb-3">
+    Scans all <strong>{$total_fmt}</strong> images in the current scope and regenerates
+    thumbnails <strong>only</strong> for images where the thumbnail is missing or empty.
+    Existing valid thumbnails are never touched — this is significantly faster than a
+    full regeneration when only a small number of thumbnails are absent.
+    Runs in chunks of {$thn_chunk}.
+    <strong>Original files are never modified.</strong>
+  </p>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <button id="lum-miss-start" class="btn btn-outline-success"{$thumb_btn_attr}>🔎 Scan &amp; Regenerate Missing</button>
+    <button id="lum-miss-cancel" class="btn btn-outline-secondary d-none">⏹ Cancel</button>
+  </div>
+</div>
+
+<!-- Missing Thumbnails: progress -->
+<div id="lum-miss-progress" class="lum-adm-card mb-3 d-none">
+  <div class="d-flex justify-content-between mb-1">
+    <span id="lum-miss-status" class="small text-muted">Starting…</span>
+    <span id="lum-miss-count"  class="small text-muted">0 / {$total_fmt}</span>
+  </div>
+  <div class="progress mb-2" style="height:20px">
+    <div id="lum-miss-bar"
+         class="progress-bar progress-bar-striped progress-bar-animated bg-warning"
+         role="progressbar" style="width:0%;font-size:.75rem">0%</div>
+  </div>
+  <div id="lum-miss-summary" class="small"></div>
 </div>
 
 <script>
@@ -639,7 +676,7 @@ document.addEventListener('DOMContentLoaded', function () {
   }()); // end Tool 2
 
 
-  // ── Tool 3: Regenerate Thumbnails ──────────────────────────────────────────
+  // ── Tool 3: Regenerate All Thumbnails ──────────────────────────────────────
   (function () {
     const CHUNK_SIZE = {$thn_chunk};
 
@@ -761,6 +798,138 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
   }()); // end Tool 3
+
+
+  // ── Tool 4: Regenerate Missing Thumbnails ──────────────────────────────────
+  (function () {
+    const CHUNK_SIZE = {$thn_chunk};
+
+    let lastId       = 0;
+    let totalChecked = 0;
+    let cancelled    = false;
+    let running      = false;
+
+    const \$start    = document.getElementById('lum-miss-start');
+    const \$cancel   = document.getElementById('lum-miss-cancel');
+    const \$progress = document.getElementById('lum-miss-progress');
+    const \$bar      = document.getElementById('lum-miss-bar');
+    const \$status   = document.getElementById('lum-miss-status');
+    const \$count    = document.getElementById('lum-miss-count');
+    const \$summary  = document.getElementById('lum-miss-summary');
+
+    if (!\$start || !\$cancel || \$start.disabled) return;
+
+    \$start.addEventListener('click', startTool);
+
+    \$cancel.addEventListener('click', function () {
+      cancelled        = true;
+      \$cancel.disabled = true;
+      \$status.textContent = 'Cancelling…';
+    });
+
+    async function startTool() {
+      if (running) return;
+      running      = true;
+      cancelled    = false;
+      lastId       = 0;
+      totalChecked = 0;
+
+      \$start.classList.add('d-none');
+      \$cancel.classList.remove('d-none');
+      \$cancel.disabled    = false;
+      \$progress.classList.remove('d-none');
+      \$summary.textContent = '';
+      resetBar(\$bar);
+
+      let totalRegenerated = 0;
+      let totalSkipped     = 0;
+      let allErrors        = [];
+      let fetchFailed      = false;
+
+      while (!cancelled) {
+        const data = await fetchChunk();
+        if (!data) { fetchFailed = true; break; }
+
+        totalChecked     += data.checked;
+        totalRegenerated += data.regenerated;
+        totalSkipped     += data.skipped;
+        lastId            = data.last_id;
+        allErrors         = allErrors.concat(data.errors || []);
+        updateBar(\$bar, \$status, \$count, totalChecked);
+
+        if (data.done) break;
+      }
+
+      if (!fetchFailed) finishTool(totalRegenerated, totalSkipped, allErrors);
+      running = false;
+    }
+
+    async function fetchChunk() {
+      try {
+        const resp = await fetch(AJAX_BASE + 'ajax_missing_thumbs.php', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body   : 'last_id='    + lastId
+                 + '&limit='     + CHUNK_SIZE
+                 + '&album_id='  + ALBUM_ID
+                 + '&csrf_token=' + encodeURIComponent(CSRF),
+        });
+        if (!resp.ok) throw new Error('Server returned ' + resp.status);
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        return data;
+      } catch (err) {
+        \$status.textContent = 'Error: ' + err.message;
+        \$bar.classList.remove('progress-bar-animated');
+        \$start.classList.remove('d-none');
+        \$cancel.classList.add('d-none');
+        running = false;
+        return null;
+      }
+    }
+
+    function finishTool(regenerated, skipped, errors) {
+      \$bar.classList.remove('progress-bar-animated');
+      \$bar.style.width = '100%';
+      \$bar.textContent = '100%';
+      \$start.classList.remove('d-none');
+      \$start.textContent = '↺ Scan Again';
+      \$cancel.classList.add('d-none');
+
+      if (cancelled) {
+        \$status.textContent = 'Cancelled after ' + totalChecked.toLocaleString() + ' images.';
+        return;
+      }
+
+      \$status.textContent = 'Complete.';
+
+      let html;
+      if (regenerated === 0 && totalChecked > 0) {
+        html = '<span class="text-success fw-semibold">✓ All '
+          + totalChecked.toLocaleString()
+          + ' thumbnails are already present — nothing to regenerate.</span>';
+      } else {
+        html = '<span class="text-success fw-semibold">✓ Done. '
+          + regenerated.toLocaleString()
+          + ' missing thumbnail' + (regenerated !== 1 ? 's' : '') + ' regenerated'
+          + (skipped > 0 ? ', ' + skipped.toLocaleString() + ' already existed (skipped)' : '')
+          + '.</span>';
+      }
+
+      if (errors.length > 0) {
+        const shown = errors.slice(0, 50);
+        html += '<details class="mt-2"><summary class="text-danger small">'
+          + errors.length + ' failure' + (errors.length !== 1 ? 's' : '') + '</summary>'
+          + '<ul class="mb-0 mt-1 small text-danger">'
+          + shown.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('')
+          + (errors.length > 50 ? '<li>…and ' + (errors.length - 50) + ' more</li>' : '')
+          + '</ul></details>';
+      }
+
+      \$summary.innerHTML = html;
+    }
+
+  }()); // end Tool 4
 
 
   // ── Shared progress bar helpers ────────────────────────────────────────────
