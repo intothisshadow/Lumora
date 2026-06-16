@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `admin/ajax_update_check.php`, `admin/includes/admin_helpers.php`, `admin/dashboard.php`,
   `include/bootstrap.php`):
   Lumora can now check for newer releases against a JSON endpoint hosted on the Lumora
-  website (`https://code.unloved-hert.net/lumora/update.json`). No gallery content, user
+  website (`https://code.unloved-heart.net/lumora/update.json`). No gallery content, user
   data, or identifying information is transmitted — only a plain GET request is made.
 
   - **`UpdateService`** (`include/services/UpdateService.php`) — new static service class.
@@ -61,7 +61,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     "minimum_php":    "8.2",
     "release_date":   "2026-06-15",
     "download_url":   "https://github.com/{owner}/lumora/releases/download/v1.6.0/lumora-v1.6.0.zip",
-    "changelog_url":  "https://code.unloved-hert.net/lumora/changelog"
+    "changelog_url":  "https://code.unloved-heart.net/lumora/changelog"
   }
   ```
   Additional fields may be added in future without breaking existing installations.
@@ -962,7 +962,7 @@ current codebase (all verified by reading each file in full):
   `LICENSE` file added to repository root.
 
 - **Developer credit** — `README.md` Development section lists developer Ariane with
-  repository link (<https://code.unloved-hert.net/lumora/>).
+  repository link (<https://code.unloved-heart.net/lumora/>).
 
 - **Image view counter** — view counts are now actually recorded when visitors use
   the lightbox. Previously `increment_image_hits()` existed in the codebase but was

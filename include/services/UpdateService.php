@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 /**
  * Lumora Gallery — Update Service
@@ -19,7 +20,7 @@ if (!defined('LUMORA_ENTRY')) exit('Direct access denied.');
 class UpdateService
 {
     /** Remote update endpoint (JSON hosted on the Lumora website). */
-    private const ENDPOINT = 'https://code.unloved-hert.net/lumora/update.json';
+    private const ENDPOINT = 'https://code.unloved-heart.net/lumora/update.json';
 
     /** Cache TTL in seconds (24 hours). */
     private const CACHE_TTL = 86400;
@@ -166,7 +167,7 @@ class UpdateService
                 'follow_location' => 1,
                 'max_redirects'   => 3,
                 'user_agent'      => 'Lumora Gallery/' . LUMORA_VERSION
-                                   . ' PHP/' . PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION,
+                    . ' PHP/' . PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION,
                 'ignore_errors'   => false,
             ],
             'ssl' => [
@@ -178,7 +179,9 @@ class UpdateService
         // Temporarily install a no-op error handler so that a failed TCP
         // connection does not write an E_WARNING to the PHP error log.
         // The return value of file_get_contents() is sufficient to detect failure.
-        set_error_handler(static function (): bool { return true; });
+        set_error_handler(static function (): bool {
+            return true;
+        });
         try {
             $raw = file_get_contents(self::ENDPOINT, false, $ctx);
         } finally {

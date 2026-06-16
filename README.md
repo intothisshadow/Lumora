@@ -236,7 +236,7 @@ A dedicated Coppermine → Lumora import tool (auto-creates categories, albums, 
 | | |
 |---|---|
 | Developer | Ariane |
-| Repository | <https://code.unloved-hert.net/lumora/> |
+| Repository | <https://code.unloved-heart.net/lumora/> |
 
 ---
 
