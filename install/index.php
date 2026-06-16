@@ -1,5 +1,4 @@
 <?php
-
 declare(strict_types=1);
 /**
  * Lumora Gallery — Installer
@@ -83,65 +82,60 @@ HTML;
 }
 
 /**
- * Split a SQL string into individual statements on bare semicolons.
+ * Split a SQL string into individual statements, respecting string literals.
  *
- * A "bare" semicolon is one that appears outside of any string literal
- * ('…', "…") or backtick-quoted identifier (`…`). Backslash escapes
- * inside strings are also handled so that e.g. '\'' does not
- * prematurely close a single-quoted string.
+ * A naive explode(';', ...) breaks when a semicolon appears inside a quoted
+ * string (e.g. inside a COMMENT '...; ...' value). This state-machine walks
+ * the SQL character-by-character, tracking whether we are inside a single-
+ * quoted string, double-quoted string, or backtick-quoted identifier, and
+ * only treats a bare ';' as a statement delimiter.
  *
- * @return string[] Array of raw statement strings (not trimmed).
+ * Line comments (-- and #) are stripped beforehand by ins_run_schema(), so
+ * we do not need to handle them here.
+ *
+ * @return list<string>
  */
 function ins_split_sql(string $sql): array
 {
-    $statements = [];
-    $current    = '';
-    $len        = strlen($sql);
-    $in_quote   = null; // null | "'" | '"' | '`'
+    $statements  = [];
+    $current     = '';
+    $in_string   = false;
+    $string_char = '';
+    $len         = strlen($sql);
 
     for ($i = 0; $i < $len; $i++) {
         $ch = $sql[$i];
 
-        if ($in_quote !== null) {
+        if ($in_string) {
             $current .= $ch;
-            // Backslash escape: skip the next character (stays inside the string).
             if ($ch === '\\') {
+                // Backslash escape: consume the next character verbatim.
                 if ($i + 1 < $len) {
                     $current .= $sql[++$i];
                 }
-                continue;
+            } elseif ($ch === $string_char) {
+                $in_string = false;
             }
-            // Doubled-quote escape: '' or "" or `` inside the same delimiter.
-            if ($ch === $in_quote && $i + 1 < $len && $sql[$i + 1] === $in_quote) {
-                $current .= $sql[++$i];
-                continue;
+        } else {
+            if ($ch === "'" || $ch === '"' || $ch === '`') {
+                $in_string   = true;
+                $string_char = $ch;
+                $current    .= $ch;
+            } elseif ($ch === ';') {
+                $trimmed = trim($current);
+                if ($trimmed !== '') {
+                    $statements[] = $trimmed;
+                }
+                $current = '';
+            } else {
+                $current .= $ch;
             }
-            // Closing delimiter.
-            if ($ch === $in_quote) {
-                $in_quote = null;
-            }
-            continue;
         }
-
-        // Outside any string/identifier.
-        if ($ch === '\'' || $ch === '"' || $ch === '`') {
-            $in_quote  = $ch;
-            $current  .= $ch;
-            continue;
-        }
-
-        if ($ch === ';') {
-            $statements[] = $current;
-            $current = '';
-            continue;
-        }
-
-        $current .= $ch;
     }
 
-    // Capture any trailing content without a terminating semicolon.
-    if (trim($current) !== '') {
-        $statements[] = $current;
+    $trimmed = trim($current);
+    if ($trimmed !== '') {
+        $statements[] = $trimmed;
     }
 
     return $statements;
@@ -151,10 +145,8 @@ function ins_split_sql(string $sql): array
  * Run the schema SQL file against the connected database.
  *
  * Strategy: strip all SQL line-comment lines (-- ...) and blank lines FIRST,
- * then split on semicolons. The previous approach of splitting first and then
- * filtering segments that start with "--" incorrectly discarded every CREATE
- * TABLE statement, because each one was preceded by a block of dashes that
- * caused the whole segment to be filtered out — leaving no tables created.
+ * then split into statements using ins_split_sql(), which is string-literal-
+ * aware and will not break on semicolons inside COMMENT '...; ...' values.
  *
  * Returns null on success, or an error string on failure.
  */
@@ -186,12 +178,9 @@ function ins_run_schema(string $schema_file, string $db_prefix): ?string
     }
     $sql_clean = implode("\n", $cleaned_lines);
 
-    // Split on bare semicolons only — semicolons inside string literals
-    // (e.g. inside a COMMENT '...;...') must not be treated as terminators.
-    $statements = array_filter(
-        array_map('trim', ins_split_sql($sql_clean)),
-        fn(string $s): bool => $s !== ''
-    );
+    // Split into individual statements using a string-literal-aware splitter.
+    // This correctly handles semicolons inside COMMENT '...; ...' values.
+    $statements = ins_split_sql($sql_clean);
 
     try {
         LumoraDB::pdo()->exec('SET NAMES utf8mb4');
@@ -211,19 +200,13 @@ function ins_check_requirements(): array
 
     // PHP version
     $ok = PHP_VERSION_ID >= 80200;
-    $checks[] = [
-        'label' => 'PHP ' . LUMORA_MIN_PHP . '+',
-        'ok' => $ok ? 'ok' : 'fail',
-        'note' => $ok ? 'PHP ' . PHP_VERSION : 'Running PHP ' . PHP_VERSION . '; upgrade required'
-    ];
+    $checks[] = ['label' => 'PHP ' . LUMORA_MIN_PHP . '+', 'ok' => $ok ? 'ok' : 'fail',
+        'note' => $ok ? 'PHP ' . PHP_VERSION : 'Running PHP ' . PHP_VERSION . '; upgrade required'];
 
     // PDO MySQL
     $ok = extension_loaded('pdo') && extension_loaded('pdo_mysql');
-    $checks[] = [
-        'label' => 'PDO MySQL',
-        'ok' => $ok ? 'ok' : 'fail',
-        'note' => $ok ? 'Available' : 'pdo_mysql extension required'
-    ];
+    $checks[] = ['label' => 'PDO MySQL', 'ok' => $ok ? 'ok' : 'fail',
+        'note' => $ok ? 'Available' : 'pdo_mysql extension required'];
 
     // Imagick PHP extension or GD
     $imagick = extension_loaded('imagick');
@@ -236,11 +219,8 @@ function ins_check_requirements(): array
 
     // Writable root
     $ok = is_writable(LUMORA_ROOT);
-    $checks[] = [
-        'label' => 'Lumora root writable',
-        'ok' => $ok ? 'ok' : 'fail',
-        'note' => $ok ? 'config.php can be written' : 'Make the Lumora directory writable by the web server'
-    ];
+    $checks[] = ['label' => 'Lumora root writable', 'ok' => $ok ? 'ok' : 'fail',
+        'note' => $ok ? 'config.php can be written' : 'Make the Lumora directory writable by the web server'];
 
     // albums/ directory
     $dir = LUMORA_ALBUMS_PATH;
@@ -248,19 +228,13 @@ function ins_check_requirements(): array
         mkdir($dir, 0755, true);
     }
     $ok = is_dir($dir) && is_writable($dir);
-    $checks[] = [
-        'label' => 'albums/ directory writable',
-        'ok' => $ok ? 'ok' : 'fail',
-        'note' => $ok ? 'Ready' : 'Create albums/ and make it writable (chmod 755)'
-    ];
+    $checks[] = ['label' => 'albums/ directory writable', 'ok' => $ok ? 'ok' : 'fail',
+        'note' => $ok ? 'Ready' : 'Create albums/ and make it writable (chmod 755)'];
 
     // config.php already exists?
     if (file_exists(LUMORA_ROOT . 'config.php')) {
-        $checks[] = [
-            'label' => 'Existing config.php',
-            'ok' => 'warn',
-            'note' => 'config.php already exists — proceeding will overwrite it'
-        ];
+        $checks[] = ['label' => 'Existing config.php', 'ok' => 'warn',
+            'note' => 'config.php already exists — proceeding will overwrite it'];
     }
 
     return $checks;
@@ -521,7 +495,7 @@ HTML;
         $msg = ins_h('Lost database connection: ' . $e->getMessage() . ' Please start over.');
         $href = ins_h($_SERVER['PHP_SELF'] . '?force=1');
         $body = '<div class="alert alert-danger">' . $msg . '</div>'
-            . '<a href="' . $href . '" class="btn btn-secondary mt-2">Start Over</a>';
+              . '<a href="' . $href . '" class="btn btn-secondary mt-2">Start Over</a>';
         ins_page('Database Error', $body, 2);
     }
 
@@ -568,7 +542,7 @@ HTML;
         $msg  = ins_h('Failed to write gallery config: ' . $e->getMessage());
         $href = ins_h($_SERVER['PHP_SELF'] . '?force=1');
         $body = '<div class="alert alert-danger">' . $msg . '</div>'
-            . '<a href="' . $href . '" class="btn btn-secondary mt-2">Start Over</a>';
+              . '<a href="' . $href . '" class="btn btn-secondary mt-2">Start Over</a>';
         ins_page('Database Error', $body, 2);
     }
 
@@ -586,7 +560,7 @@ HTML;
         $msg  = ins_h('Failed to create admin user: ' . $e->getMessage());
         $href = ins_h($_SERVER['PHP_SELF'] . '?force=1');
         $body = '<div class="alert alert-danger">' . $msg . '</div>'
-            . '<a href="' . $href . '" class="btn btn-secondary mt-2">Start Over</a>';
+              . '<a href="' . $href . '" class="btn btn-secondary mt-2">Start Over</a>';
         ins_page('Database Error', $body, 2);
     }
 
@@ -616,9 +590,9 @@ HTML;
 
     if (file_put_contents(LUMORA_ROOT . 'config.php', $config_php) === false) {
         $body = '<div class="alert alert-danger">Could not write config.php to disk. '
-            . 'Check that the Lumora root directory is writable, then paste the content below into '
-            . '<code>config.php</code> manually.</div>'
-            . '<pre class="bg-light p-3 rounded small">' . ins_h($config_php) . '</pre>';
+              . 'Check that the Lumora root directory is writable, then paste the content below into '
+              . '<code>config.php</code> manually.</div>'
+              . '<pre class="bg-light p-3 rounded small">' . ins_h($config_php) . '</pre>';
         ins_page('Manual Setup Required', $body, 3);
     }
 
@@ -645,7 +619,7 @@ HTML;
     $install_status_html = $install_deleted
         ? '<div class="alert alert-success py-2 small mt-2">&#10003; The <code>install/</code> directory was automatically removed.</div>'
         : '<div class="alert alert-warning py-2 small mt-2">&#9888; The <code>install/</code> directory could not be removed automatically. '
-        . 'Please delete it manually via FTP or your hosting control panel.</div>';
+          . 'Please delete it manually via FTP or your hosting control panel.</div>';
 
     $body = <<<HTML
 <div class="alert alert-success">
@@ -678,19 +652,11 @@ unset($_SESSION['ins_errors'], $_SESSION['ins_db']);
 
 $rows = '';
 foreach ($checks as $c) {
-    $icon  = match ($c['ok']) {
-        'ok' => '✓',
-        'warn' => '⚠',
-        default => '✗'
-    };
-    $cls   = match ($c['ok']) {
-        'ok' => 'req-ok',
-        'warn' => 'req-warn',
-        default => 'req-fail'
-    };
+    $icon  = match($c['ok']) { 'ok' => '✓', 'warn' => '⚠', default => '✗' };
+    $cls   = match($c['ok']) { 'ok' => 'req-ok', 'warn' => 'req-warn', default => 'req-fail' };
     $rows .= '<tr><td class="' . $cls . '">' . $icon . '</td>'
-        . '<td><strong>' . ins_h($c['label']) . '</strong>'
-        . '<br><small class="text-muted">' . ins_h($c['note']) . '</small></td></tr>';
+           . '<td><strong>' . ins_h($c['label']) . '</strong>'
+           . '<br><small class="text-muted">' . ins_h($c['note']) . '</small></td></tr>';
 }
 
 $err_html = '';

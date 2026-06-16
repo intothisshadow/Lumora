@@ -21,7 +21,7 @@
 -- Migration from DB version 3:
 --   ALTER TABLE `{PREFIX}categories`
 --     ADD COLUMN `thumb_image_id` int UNSIGNED NOT NULL DEFAULT 0
---       COMMENT 'FK to images.id; 0 = auto-pick first album image';
+--       COMMENT 'FK to images.id, 0 = auto-pick first album image';
 --
 -- Migration from DB version 2:
 --   Run the CREATE TABLE statement for {PREFIX}remember_tokens below (with your actual prefix).
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}categories` (
   `name`           varchar(255)  NOT NULL,
   `description`    text          NOT NULL,
   `pos`            int           NOT NULL DEFAULT 0,
-  `thumb_image_id` int UNSIGNED  NOT NULL DEFAULT 0 COMMENT 'FK to images.id; 0 = auto-pick first album image',
+  `thumb_image_id` int UNSIGNED  NOT NULL DEFAULT 0 COMMENT 'FK to images.id, 0 = auto-pick first album image',
   PRIMARY KEY (`id`),
   KEY `parent_id` (`parent_id`),
   KEY `pos`       (`pos`)

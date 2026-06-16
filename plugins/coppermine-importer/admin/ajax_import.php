@@ -48,7 +48,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     cpg_json_error('POST required', 405);
 }
 
-if (!lumora_csrf_check()) {
+// lumora_csrf_validate() is void — calling it inside !() always evaluates true.
+// Use an inline boolean check so CSRF failures return JSON, not plain text.
+if (!isset($_POST['csrf_token']) || !hash_equals(lumora_csrf_token(), $_POST['csrf_token'])) {
     cpg_json_error('CSRF token invalid', 403);
 }
 
@@ -83,133 +85,128 @@ try {
     cpg_json_error('Could not connect to Coppermine database: ' . $e->getMessage(), 500);
 }
 
-// Extend PHP time limit for potentially long chunks
 set_time_limit(300);
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 
-switch ($action) {
+// Wrap the entire switch in try/catch so any uncaught exception from an importer
+// method surfaces as a readable JSON error rather than a blank HTTP 500.
+try {
+    switch ($action) {
 
-    // ── Import categories ─────────────────────────────────────────────────────
-    case 'import_categories':
+        // ── Import categories ─────────────────────────────────────────────────
+        case 'import_categories':
 
-        $result = $importer->importCategories(
-            (int) ($sess['cat_last_id'] ?? 0),
-            LUMORA_CPG_IMPORTER_CAT_CHUNK,
-            $sess['cat_id_map'] ?? []
-        );
+            $result = $importer->importCategories(
+                (int) ($sess['cat_last_id'] ?? 0),
+                LUMORA_CPG_IMPORTER_CAT_CHUNK,
+                $sess['cat_id_map'] ?? []
+            );
 
-        // Merge new ID mappings into the session map
-        $sess['cat_id_map']  = array_merge(
-            $sess['cat_id_map'] ?? [],
-            $result['id_map']   ?? []
-        );
-        $sess['cat_last_id'] = $result['last_id'];
-        $sess['imported']['categories'] = ($sess['imported']['categories'] ?? 0) + $result['imported'];
+            // Use + operator, not array_merge() — array_merge() re-indexes integer
+            // keys, corrupting every CPG cid → Lumora id lookup on subsequent chunks.
+            $sess['cat_id_map']             = ($sess['cat_id_map'] ?? []) + ($result['id_map'] ?? []);
+            $sess['cat_last_id']            = $result['last_id'];
+            $sess['imported']['categories'] = ($sess['imported']['categories'] ?? 0) + $result['imported'];
 
-        // Log errors to migration log
-        foreach (array_slice($result['errors'], 0, 20) as $err) {
-            MigrationService::logEvent(LUMORA_CPG_IMPORTER_SOURCE, MigrationService::LOG_WARNING, $err);
-        }
+            foreach (array_slice($result['errors'], 0, 20) as $err) {
+                MigrationService::logEvent(LUMORA_CPG_IMPORTER_SOURCE, MigrationService::LOG_WARNING, $err);
+            }
 
-        cpg_json_ok([
-            'imported'  => $result['imported'],
-            'skipped'   => $result['skipped'],
-            'errors'    => $result['errors'],
-            'done'      => $result['done'],
-            'last_id'   => $result['last_id'],
-            'total_imported' => $sess['imported']['categories'],
-        ]);
+            cpg_json_ok([
+                'imported'       => $result['imported'],
+                'skipped'        => $result['skipped'],
+                'errors'         => $result['errors'],
+                'done'           => $result['done'],
+                'last_id'        => $result['last_id'],
+                'total_imported' => $sess['imported']['categories'],
+            ]);
 
-    // ── Import albums ─────────────────────────────────────────────────────────
-    case 'import_albums':
+        // ── Import albums ─────────────────────────────────────────────────────
+        case 'import_albums':
 
-        $result = $importer->importAlbums(
-            (int) ($sess['album_last_id'] ?? 0),
-            LUMORA_CPG_IMPORTER_ALB_CHUNK,
-            $sess['cat_id_map'] ?? []
-        );
+            $result = $importer->importAlbums(
+                (int) ($sess['album_last_id'] ?? 0),
+                LUMORA_CPG_IMPORTER_ALB_CHUNK,
+                $sess['cat_id_map'] ?? []
+            );
 
-        $sess['album_id_map']  = array_merge(
-            $sess['album_id_map'] ?? [],
-            $result['id_map']     ?? []
-        );
-        $sess['album_last_id'] = $result['last_id'];
-        $sess['imported']['albums'] = ($sess['imported']['albums'] ?? 0) + $result['imported'];
+            $sess['album_id_map']        = ($sess['album_id_map'] ?? []) + ($result['id_map'] ?? []);
+            $sess['album_last_id']       = $result['last_id'];
+            $sess['imported']['albums']  = ($sess['imported']['albums'] ?? 0) + $result['imported'];
 
-        foreach (array_slice($result['errors'], 0, 20) as $err) {
-            MigrationService::logEvent(LUMORA_CPG_IMPORTER_SOURCE, MigrationService::LOG_WARNING, $err);
-        }
+            foreach (array_slice($result['errors'], 0, 20) as $err) {
+                MigrationService::logEvent(LUMORA_CPG_IMPORTER_SOURCE, MigrationService::LOG_WARNING, $err);
+            }
 
-        cpg_json_ok([
-            'imported'       => $result['imported'],
-            'skipped'        => $result['skipped'],
-            'errors'         => $result['errors'],
-            'done'           => $result['done'],
-            'last_id'        => $result['last_id'],
-            'total_imported' => $sess['imported']['albums'],
-        ]);
+            cpg_json_ok([
+                'imported'       => $result['imported'],
+                'skipped'        => $result['skipped'],
+                'errors'         => $result['errors'],
+                'done'           => $result['done'],
+                'last_id'        => $result['last_id'],
+                'total_imported' => $sess['imported']['albums'],
+            ]);
 
-    // ── Import images ─────────────────────────────────────────────────────────
-    case 'import_images':
+        // ── Import images ─────────────────────────────────────────────────────
+        case 'import_images':
 
-        $result = $importer->importImages(
-            (int) ($sess['img_last_id'] ?? 0),
-            LUMORA_CPG_IMPORTER_IMG_CHUNK,
-            $sess['album_id_map'] ?? []
-        );
+            $result = $importer->importImages(
+                (int) ($sess['img_last_id'] ?? 0),
+                LUMORA_CPG_IMPORTER_IMG_CHUNK,
+                $sess['album_id_map'] ?? []
+            );
 
-        $sess['img_last_id'] = $result['last_id'];
-        $sess['imported']['images'] = ($sess['imported']['images'] ?? 0) + $result['imported'];
+            $sess['img_last_id']         = $result['last_id'];
+            $sess['imported']['images']  = ($sess['imported']['images'] ?? 0) + $result['imported'];
 
-        // Log file-missing errors at warning level; other errors at error level
-        foreach (array_slice($result['errors'], 0, 20) as $err) {
-            $level = str_contains($err, 'not found')
-                ? MigrationService::LOG_WARNING
-                : MigrationService::LOG_ERROR;
-            MigrationService::logEvent(LUMORA_CPG_IMPORTER_SOURCE, $level, $err);
-        }
+            foreach (array_slice($result['errors'], 0, 20) as $err) {
+                $level = str_contains($err, 'not found')
+                    ? MigrationService::LOG_WARNING
+                    : MigrationService::LOG_ERROR;
+                MigrationService::logEvent(LUMORA_CPG_IMPORTER_SOURCE, $level, $err);
+            }
 
-        cpg_json_ok([
-            'imported'       => $result['imported'],
-            'skipped'        => $result['skipped'],
-            'missing_files'  => $result['missing_files'],
-            'errors'         => $result['errors'],
-            'done'           => $result['done'],
-            'last_id'        => $result['last_id'],
-            'total_imported' => $sess['imported']['images'],
-        ]);
+            cpg_json_ok([
+                'imported'       => $result['imported'],
+                'skipped'        => $result['skipped'],
+                'missing_files'  => $result['missing_files'],
+                'errors'         => $result['errors'],
+                'done'           => $result['done'],
+                'last_id'        => $result['last_id'],
+                'total_imported' => $sess['imported']['images'],
+            ]);
 
-    // ── Finish ────────────────────────────────────────────────────────────────
-    case 'finish':
+        // ── Finish ────────────────────────────────────────────────────────────
+        case 'finish':
 
-        $imported = $sess['imported'] ?? ['categories' => 0, 'albums' => 0, 'images' => 0];
+            $imported = $sess['imported'] ?? ['categories' => 0, 'albums' => 0, 'images' => 0];
 
-        // Record migration status
-        MigrationService::saveMigrationStatus(
-            LUMORA_CPG_IMPORTER_SOURCE,
-            $imported,
-            LUMORA_CPG_IMPORTER_VERSION
-        );
-
-        // Write summary log entry
-        MigrationService::logEvent(
-            LUMORA_CPG_IMPORTER_SOURCE,
-            MigrationService::LOG_INFO,
-            sprintf(
-                'Import completed: %d categories, %d albums, %d images (plugin v%s)',
-                $imported['categories'],
-                $imported['albums'],
-                $imported['images'],
+            MigrationService::saveMigrationStatus(
+                LUMORA_CPG_IMPORTER_SOURCE,
+                $imported,
                 LUMORA_CPG_IMPORTER_VERSION
-            )
-        );
+            );
 
-        // Clear sensitive session data
-        unset($_SESSION[$sess_key]);
+            MigrationService::logEvent(
+                LUMORA_CPG_IMPORTER_SOURCE,
+                MigrationService::LOG_INFO,
+                sprintf(
+                    'Import completed: %d categories, %d albums, %d images (plugin v%s)',
+                    $imported['categories'],
+                    $imported['albums'],
+                    $imported['images'],
+                    LUMORA_CPG_IMPORTER_VERSION
+                )
+            );
 
-        cpg_json_ok(['imported' => $imported]);
+            unset($_SESSION[$sess_key]);
 
-    default:
-        cpg_json_error("Unknown action: {$action}", 400);
+            cpg_json_ok(['imported' => $imported]);
+
+        default:
+            cpg_json_error('Unknown action: ' . $action, 400);
+    }
+} catch (\Throwable $e) {
+    cpg_json_error('Import error: ' . $e->getMessage(), 500);
 }

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+
+
 ## [1.7.0] — 2026-06-16
 
 ### Added
@@ -65,6 +67,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   }
   ```
   Additional fields may be added in future without breaking existing installations.
+
+### Fixed
+
+- **`install/schema.sql` — semicolon in `COMMENT` string made the schema permanently fragile**:
+  The `thumb_image_id` column on `{PREFIX}categories` carried
+  `COMMENT 'FK to images.id; 0 = auto-pick first album image'`. The semicolon
+  inside the string literal is invisible to any string-literal-aware SQL splitter
+  but is a latent footgun: if the `ins_split_sql()` guard is ever lost (e.g. the
+  file is replaced with a pre-fix version), the naive `explode(';', ...)` path
+  silently re-emerges and the installer breaks again. Fixed by changing the
+  semicolon to a comma: `'FK to images.id, 0 = auto-pick first album image'`.
+  The migration comment at the top of the file is updated to match.
+
+- **`install/index.php` — `ins_split_sql()` lost when file was overwritten**:
+  The string-literal-aware SQL splitter added to fix the `COMMENT` semicolon bug
+  was absent from the file on disk — the file had been replaced with a pre-fix
+  version. `ins_run_schema()` had reverted to the naive `explode(';', $sql_clean)`
+  path, causing the same SQLSTATE[42000] error 1064 on fresh installs.
+  `ins_split_sql()` re-added and `ins_run_schema()` updated to call it.
 
 ### Changed
 
@@ -136,14 +157,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     than the standard `added` column name.
   - **`width`/`height`/`pos`/`caption` entirely absent**: columns added in later
     CPG versions that may simply not exist after an incomplete upgrade.
-  `importImages()` previously built a fixed SELECT; any missing or renamed column
-  caused `PDO::prepare()` to throw `PDOException[42S22]` immediately. Fixed by
-  adding `getPictureColumns()` (queries `INFORMATION_SCHEMA.COLUMNS` once per
-  request, cached on the instance) and building the SELECT dynamically. Renamed
-  columns are aliased with SQL `AS` so the foreach always reads `$row['width']`,
-  `$row['height']`, and `$row['added']` regardless of the actual column name;
-  entirely absent columns fall back to `0` / `''` via the existing `?? 0` / `??''`
-  expressions already in the foreach.
+    `importImages()` previously built a fixed SELECT; any missing or renamed column
+    caused `PDO::prepare()` to throw `PDOException[42S22]` immediately. Fixed by
+    adding `getPictureColumns()` (queries `INFORMATION_SCHEMA.COLUMNS` once per
+    request, cached on the instance) and building the SELECT dynamically. Renamed
+    columns are aliased with SQL `AS` so the foreach always reads `$row['width']`,
+    `$row['height']`, and `$row['added']` regardless of the actual column name;
+    entirely absent columns fall back to `0` / `''` via the existing `?? 0` / `??''`
+    expressions already in the foreach.
 
 - **`plugins/coppermine-importer/admin/ajax_import.php` + `CoppermineImporter.php` — albums skipped, images HTTP 500 during first production import**:
   Three bugs manifested together:

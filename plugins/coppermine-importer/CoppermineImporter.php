@@ -15,14 +15,23 @@ declare(strict_types=1);
  *   running the import. The importer validates file presence and reports
  *   any missing originals or thumbnails.
  *
+ * Schema compatibility:
+ *   CPG installations upgraded in-place over many years often have column
+ *   names that differ from the canonical schema. importImages() uses
+ *   getPictureColumns() + buildPictureSelect() to query INFORMATION_SCHEMA
+ *   once per request and build a SELECT that aliases any renamed columns
+ *   (pwidth/pheight → width/height, ctime → added) so the foreach always
+ *   reads the same keys regardless of the actual schema.
+ *
  * @copyright Copyright (C) 2025 Ariane
  * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
  */
 
 final class CoppermineImporter
 {
-    private \PDO   $cpg;         // Coppermine PDO connection
-    private string $cpg_prefix;  // Coppermine table prefix (e.g. 'cpg78_')
+    private \PDO    $cpg;                        // Coppermine PDO connection
+    private string  $cpg_prefix;                 // e.g. 'cpg78_'
+    private ?array  $picture_columns = null;     // cached INFORMATION_SCHEMA result
 
     public function __construct(
         private readonly string $host,
@@ -68,27 +77,18 @@ final class CoppermineImporter
     {
         try {
             $this->connect();
-            $counts = $this->getCounts();
-
-            // Try to detect Coppermine version from config table
-            $cpg_version = '?';
+            $counts      = $this->getCounts();
+            $cpg_version = 'unknown';
             try {
-                $stmt = $this->cpg->prepare(
-                    "SELECT `value` FROM `{$this->cpg_prefix}config` WHERE `name` = 'last_updates_check' LIMIT 1"
-                );
-                $stmt->execute();
-                // Use gallery_name as a proxy; detect by presence of known config keys
                 $stmt = $this->cpg->prepare(
                     "SELECT COUNT(*) FROM `{$this->cpg_prefix}config`"
                 );
                 $stmt->execute();
-                $cfg_count = (int) $stmt->fetchColumn();
-                if ($cfg_count > 0) {
+                if ((int) $stmt->fetchColumn() > 0) {
                     $cpg_version = 'detected';
                 }
             } catch (\Throwable) {
             }
-
             return array_merge($counts, ['ok' => true, 'cpg_version' => $cpg_version]);
         } catch (\Throwable $e) {
             return ['ok' => false, 'categories' => 0, 'albums' => 0, 'images' => 0,
@@ -123,12 +123,9 @@ final class CoppermineImporter
     /**
      * Import a chunk of categories using keyset pagination.
      *
-     * Returns a partial id_map for this chunk. The caller must merge it into
-     * the full cat_id_map stored in the PHP session.
-     *
-     * @param  int              $last_id   Last Coppermine cid processed (0 = start)
-     * @param  int              $limit     Chunk size
-     * @param  array<int, int>  $cat_id_map  Accumulated CPG cid → Lumora cat_id (for parent resolution)
+     * @param  int              $last_id     Last CPG cid processed (0 = start)
+     * @param  int              $limit       Chunk size
+     * @param  array<int, int>  $cat_id_map  Accumulated CPG cid → Lumora cat_id
      * @return array{imported: int, skipped: int, errors: list<string>,
      *               done: bool, last_id: int, id_map: array<int, int>}
      */
@@ -157,22 +154,21 @@ final class CoppermineImporter
              VALUES (?, ?, ?, ?, 0)"
         );
 
-        $imported  = 0;
-        $skipped   = 0;
-        $errors    = [];
-        $id_map    = [];
-        $new_last  = $last_id;
+        $imported = 0;
+        $skipped  = 0;
+        $errors   = [];
+        $id_map   = [];
+        $new_last = $last_id;
 
         foreach ($rows as $row) {
-            $cpg_cid   = (int) $row['cid'];
-            $new_last  = max($new_last, $cpg_cid);
+            $cpg_cid  = (int) $row['cid'];
+            $new_last = max($new_last, $cpg_cid);
 
             $name        = $this->decodeCpgText((string) ($row['name']        ?? ''));
             $description = $this->decodeCpgText((string) ($row['description'] ?? ''));
-            $pos         = (int) ($row['pos'] ?? 0);
+            $pos         = (int) ($row['pos']    ?? 0);
             $cpg_parent  = (int) ($row['parent'] ?? 0);
 
-            // Map CPG parent cid to Lumora parent_id; root categories (parent=0) stay at 0
             $lumora_parent = 0;
             if ($cpg_parent > 0) {
                 $lumora_parent = $cat_id_map[$cpg_parent] ?? ($id_map[$cpg_parent] ?? 0);
@@ -186,7 +182,7 @@ final class CoppermineImporter
 
             try {
                 $insert->execute([$lumora_parent, $name, $description, $pos]);
-                $lumora_cid    = (int) $lumora_pdo->lastInsertId();
+                $lumora_cid       = (int) $lumora_pdo->lastInsertId();
                 $id_map[$cpg_cid] = $lumora_cid;
                 $imported++;
             } catch (\Throwable $e) {
@@ -205,13 +201,16 @@ final class CoppermineImporter
     /**
      * Import a chunk of albums using keyset pagination.
      *
-     * Albums are skipped if their CPG category has no mapping in $cat_id_map,
-     * meaning the category was excluded or the category chunk hasn't run yet.
-     * Run all category chunks before starting albums.
+     * Folder name resolution priority:
+     *   1. The actual filepath recorded in cpg_pictures for that album (most
+     *      accurate — reflects the real on-disk directory even when the keyword
+     *      column is empty, wrong, or was changed after upload).
+     *   2. resolveCpgAlbumFolder() from the keyword column (fallback for albums
+     *      that have no images yet).
      *
-     * @param  int              $last_id      Last CPG aid processed (0 = start)
-     * @param  int              $limit        Chunk size
-     * @param  array<int, int>  $cat_id_map   Full CPG cid → Lumora cat_id map
+     * @param  int              $last_id     Last CPG aid processed (0 = start)
+     * @param  int              $limit       Chunk size
+     * @param  array<int, int>  $cat_id_map  Full CPG cid → Lumora cat_id map
      * @return array{imported: int, skipped: int, errors: list<string>,
      *               done: bool, last_id: int, id_map: array<int, int>}
      */
@@ -231,6 +230,11 @@ final class CoppermineImporter
             return ['imported' => 0, 'skipped' => 0, 'errors' => [], 'done' => true,
                     'last_id' => $last_id, 'id_map' => []];
         }
+
+        // Fetch actual on-disk paths from cpg_pictures for all aids in this chunk.
+        // This is more reliable than the keyword column, which may be empty or stale.
+        $chunk_aids    = array_map(static fn($r) => (int) $r['aid'], $rows);
+        $filepath_map  = $this->fetchCpgAlbumFilepaths($chunk_aids);
 
         $lumora_pdo = LumoraDB::pdo();
         $pre        = LumoraDB::prefix();
@@ -262,21 +266,24 @@ final class CoppermineImporter
 
             $title       = $this->decodeCpgText((string) ($row['title']       ?? ''));
             $description = $this->decodeCpgText((string) ($row['description'] ?? ''));
-            $pos         = (int) ($row['pos']         ?? 0);
-            $hits        = (int) ($row['alb_hits']    ?? 0);
-            $visibility  = (int) ($row['visibility']  ?? 0) > 0 ? 1 : 0;
-            $folder      = $this->resolveCpgAlbumFolder($cpg_aid, (string) ($row['keyword'] ?? ''));
+            $pos         = (int) ($row['pos']      ?? 0);
+            $hits        = (int) ($row['alb_hits'] ?? 0);
+            $visibility  = (int) ($row['visibility'] ?? 0) > 0 ? 1 : 0;
+
+            // Primary: use filepath from pictures table (reflects actual on-disk path).
+            // Fallback: derive from keyword column for albums with no images yet.
+            $folder = $filepath_map[$cpg_aid]
+                ?? $this->resolveCpgAlbumFolder($cpg_aid, (string) ($row['keyword'] ?? ''));
 
             if ($title === '') {
-                $title = $folder; // fallback: use folder name as title
+                $title = $folder;
             }
 
-            // Ensure folder name is unique in Lumora (append _cpg{aid} if collision)
             $folder = $this->ensureUniqueFolder($lumora_pdo, $pre, $folder, $cpg_aid);
 
             try {
                 $insert->execute([$lumora_cat, $folder, $title, $description, $visibility, $pos, $hits]);
-                $lumora_aid    = (int) $lumora_pdo->lastInsertId();
+                $lumora_aid       = (int) $lumora_pdo->lastInsertId();
                 $id_map[$cpg_aid] = $lumora_aid;
                 $imported++;
             } catch (\Throwable $e) {
@@ -295,10 +302,11 @@ final class CoppermineImporter
     /**
      * Import a chunk of image records using keyset pagination.
      *
-     * Files are expected to already exist in Lumora's albums/ directory at the
-     * same relative path as in Coppermine. The importer records missing files
-     * in the error list but still creates the DB record so the import can
-     * later be reconciled using the Tools → File Integrity Check.
+     * The SELECT is built dynamically via buildPictureSelect() to handle CPG
+     * installations where column names differ from the canonical schema
+     * (e.g. pwidth/pheight instead of width/height, ctime instead of added).
+     * filepath is intentionally excluded — the album folder is resolved via
+     * the album_id_map + Lumora albums table, not from the pictures row.
      *
      * @param  int              $last_id      Last CPG pid processed (0 = start)
      * @param  int              $limit        Chunk size
@@ -308,9 +316,10 @@ final class CoppermineImporter
      */
     public function importImages(int $last_id, int $limit, array $album_id_map): array
     {
+        $select = $this->buildPictureSelect();
+
         $stmt = $this->cpg->prepare(
-            "SELECT `pid`, `aid`, `filepath`, `filename`, `filesize`, `width`, `height`,
-                    `hits`, `approved`, `pos`, `title`, `caption`, `added`
+            "SELECT {$select}
                FROM `{$this->cpg_prefix}pictures`
               WHERE `pid` > ?
               ORDER BY `pid` ASC
@@ -327,13 +336,13 @@ final class CoppermineImporter
         $lumora_pdo = LumoraDB::pdo();
         $pre        = LumoraDB::prefix();
 
-        // Prefetch Lumora album folders for all aids in this chunk to minimise queries
-        $cpg_aids    = array_unique(array_column($rows, 'aid'));
-        $folder_map  = $this->fetchLumoraFolders($lumora_pdo, $pre, $cpg_aids, $album_id_map);
+        $cpg_aids   = array_unique(array_column($rows, 'aid'));
+        $folder_map = $this->fetchLumoraFolders($lumora_pdo, $pre, $cpg_aids, $album_id_map);
 
         $insert = $lumora_pdo->prepare(
             "INSERT INTO `{$pre}images`
-                 (`album_id`, `filename`, `title`, `filesize`, `width`, `height`, `hits`, `approved`, `pos`, `added_at`)
+                 (`album_id`, `filename`, `title`, `filesize`, `width`, `height`,
+                  `hits`, `approved`, `pos`, `added_at`)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         );
 
@@ -362,7 +371,7 @@ final class CoppermineImporter
                 continue;
             }
 
-            $folder   = $folder_map[$lumora_album_id] ?? null;
+            $folder = $folder_map[$lumora_album_id] ?? null;
             if ($folder !== null) {
                 $file_path  = LUMORA_ALBUMS_PATH . $folder . DIRECTORY_SEPARATOR . $filename;
                 $thumb_path = LUMORA_ALBUMS_PATH . $folder . DIRECTORY_SEPARATOR . LUMORA_THUMB_PREFIX . $filename;
@@ -371,10 +380,9 @@ final class CoppermineImporter
                     $errors[] = "Image pid={$cpg_pid}: original not found at albums/{$folder}/{$filename}";
                 } elseif (!is_file($thumb_path)) {
                     $missing_files++;
-                    $errors[] = "Image pid={$cpg_pid}: thumbnail not found at albums/{$folder}/" . LUMORA_THUMB_PREFIX . "{$filename}";
+                    $errors[] = "Image pid={$cpg_pid}: thumbnail not found at albums/{$folder}/"
+                        . LUMORA_THUMB_PREFIX . $filename;
                 }
-                // Still import the DB record even if files are missing;
-                // admin can reconcile with File Integrity Check.
             }
 
             $title    = $this->decodeCpgText((string) ($row['title']    ?? ''));
@@ -384,9 +392,8 @@ final class CoppermineImporter
             $hits     = (int) ($row['hits']     ?? 0);
             $approved = $this->normalizeApproved($row['approved'] ?? 'YES');
             $pos      = (int) ($row['pos']      ?? 0);
-            $added_at = $this->normalizeDate($row['added'] ?? null);
+            $added_at = $this->normalizeDate($row['added']       ?? null);
 
-            // Prefer title; fall back to caption if title is blank
             if ($title === '') {
                 $title = $this->decodeCpgText((string) ($row['caption'] ?? ''));
             }
@@ -411,44 +418,156 @@ final class CoppermineImporter
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /**
-     * Resolve the Lumora album folder name from a Coppermine album record.
+     * Fetch the actual on-disk folder path for a set of CPG album IDs by reading
+     * the filepath column from cpg_pictures.
      *
-     * Coppermine logic:
-     *   - Albums with a non-empty keyword use the keyword as the folder path.
-     *     e.g. keyword='xena/season1' → folder='xena/season1'
-     *   - Albums with an empty/null keyword use a 5-digit zero-padded aid.
-     *     e.g. aid=1 → folder='00001'
+     * cpg_pictures.filepath is the ground truth for what directory CPG wrote
+     * each image into (e.g. 'albums/Season1/Screencaps/1x01-TheHedgeKnight/').
+     * This is more reliable than cpg_albums.keyword, which may be empty, stale,
+     * or differ from the filesystem after manual moves.
+     *
+     * The 'albums/' prefix (CPG's fullpath config, always 'albums/') and trailing
+     * slash are stripped so the result matches Lumora's folder format.
+     *
+     * Returns [] silently if the filepath column does not exist on this CPG install.
+     *
+     * @param  list<int>        $aids  CPG album IDs to look up
+     * @return array<int, string>  CPG aid → folder string
      */
-    private function resolveCpgAlbumFolder(int $aid, string $keyword): string
+    private function fetchCpgAlbumFilepaths(array $aids): array
     {
-        $kw = trim($keyword, " \t\n\r/\\");
-        if ($kw !== '') {
-            // Sanitise lightly: strip any remaining leading dots or absolute-path markers
-            $kw = ltrim($kw, './\\');
-            return $kw !== '' ? $kw : sprintf('%05d', $aid);
+        if (empty($aids)) {
+            return [];
         }
-        return sprintf('%05d', $aid);
+        try {
+            $placeholders = implode(',', array_fill(0, count($aids), '?'));
+            $stmt = $this->cpg->prepare(
+                "SELECT `aid`, MIN(`filepath`) AS `filepath`
+                   FROM `{$this->cpg_prefix}pictures`
+                  WHERE `aid` IN ({$placeholders})
+                  GROUP BY `aid`"
+            );
+            $stmt->execute($aids);
+            $result = [];
+            foreach ($stmt->fetchAll() as $row) {
+                $fp = trim((string) ($row['filepath'] ?? ''), " \t\n\r/\\");
+                // Strip leading 'albums/' prefix that CPG prepends to all filepaths
+                $fp = (string) preg_replace('#^albums/#i', '', $fp);
+                $fp = trim($fp, '/');
+                if ($fp !== '') {
+                    $result[(int) $row['aid']] = $fp;
+                }
+            }
+            return $result;
+        } catch (\Throwable) {
+            // filepath column absent on some CPG variants — degrade to keyword fallback
+            return [];
+        }
     }
 
     /**
-     * Ensure a folder name is unique in Lumora albums table.
-     * If a collision exists, appends _cpg{$aid}.
+     * Query INFORMATION_SCHEMA to get all column names for the pictures table.
+     * Result is cached on the instance for the lifetime of a single AJAX request.
+     *
+     * @return list<string>
+     */
+    private function getPictureColumns(): array
+    {
+        if ($this->picture_columns !== null) {
+            return $this->picture_columns;
+        }
+        try {
+            $stmt = $this->cpg->prepare(
+                "SELECT `COLUMN_NAME`
+                   FROM `INFORMATION_SCHEMA`.`COLUMNS`
+                  WHERE `TABLE_SCHEMA` = DATABASE()
+                    AND `TABLE_NAME`   = ?
+                  ORDER BY `ORDINAL_POSITION`"
+            );
+            $stmt->execute([$this->cpg_prefix . 'pictures']);
+            $this->picture_columns = array_column($stmt->fetchAll(), 'COLUMN_NAME');
+        } catch (\Throwable) {
+            $this->picture_columns = [];
+        }
+        return $this->picture_columns;
+    }
+
+    /**
+     * Build a SELECT clause for cpg_pictures that works across CPG schema variants.
+     *
+     * Known column name variations handled:
+     *   - width / height   → may be pwidth / pheight in CPG 1.6.29+
+     *   - added            → may be ctime in some older forks
+     *   - pos, caption     → may be absent entirely after an incomplete upgrade
+     *
+     * All selected columns are aliased to their canonical names so the foreach
+     * in importImages() always reads $row['width'], $row['added'], etc.
+     *
+     * filepath is intentionally omitted — album folder is resolved via
+     * the album_id_map + Lumora albums table.
+     */
+    private function buildPictureSelect(): string
+    {
+        $cols = $this->getPictureColumns();
+        $has  = static fn(string $c): bool => in_array($c, $cols, true);
+
+        $parts = ['`pid`', '`aid`', '`filename`'];
+
+        $parts[] = $has('filesize') ? '`filesize`'        : '0 AS `filesize`';
+
+        // Dimensions
+        if ($has('width'))        { $parts[] = '`width`'; }
+        elseif ($has('pwidth'))   { $parts[] = '`pwidth`  AS `width`'; }
+        else                      { $parts[] = '0 AS `width`'; }
+
+        if ($has('height'))       { $parts[] = '`height`'; }
+        elseif ($has('pheight'))  { $parts[] = '`pheight` AS `height`'; }
+        else                      { $parts[] = '0 AS `height`'; }
+
+        $parts[] = $has('hits')     ? '`hits`'              : '0 AS `hits`';
+        $parts[] = $has('approved') ? '`approved`'          : "'YES' AS `approved`";
+        $parts[] = $has('pos')      ? '`pos`'               : '0 AS `pos`';
+        $parts[] = $has('title')    ? '`title`'             : "'' AS `title`";
+        $parts[] = $has('caption')  ? '`caption`'           : "'' AS `caption`";
+
+        // Timestamp
+        if ($has('added'))        { $parts[] = '`added`'; }
+        elseif ($has('ctime'))    { $parts[] = '`ctime` AS `added`'; }
+        else                      { $parts[] = 'NULL AS `added`'; }
+
+        return implode(', ', $parts);
+    }
+
+    /**
+     * Resolve the Lumora album folder name from a Coppermine album record.
+     * Used as fallback when no images exist yet for the album in cpg_pictures.
+     *
+     * CPG logic:
+     *   - Non-empty keyword → use as folder path (e.g. 'xena/season1')
+     *   - Empty keyword     → zero-padded aid (e.g. aid=1 → '00001')
+     */
+    private function resolveCpgAlbumFolder(int $aid, string $keyword): string
+    {
+        $kw = ltrim(trim($keyword, " \t\n\r/\\"), './\\');
+        return $kw !== '' ? $kw : sprintf('%05d', $aid);
+    }
+
+    /**
+     * Return $folder unchanged if it is unique in Lumora's albums table,
+     * otherwise append _cpg{aid} to avoid a collision.
      */
     private function ensureUniqueFolder(\PDO $pdo, string $pre, string $folder, int $cpg_aid): string
     {
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM `{$pre}albums` WHERE `folder` = ?");
         $stmt->execute([$folder]);
-        if ((int) $stmt->fetchColumn() === 0) {
-            return $folder;
-        }
-        return $folder . '_cpg' . $cpg_aid;
+        return (int) $stmt->fetchColumn() === 0 ? $folder : $folder . '_cpg' . $cpg_aid;
     }
 
     /**
-     * Fetch Lumora album folders for a set of Lumora album IDs.
+     * Fetch Lumora album folder strings for a set of CPG album IDs.
      *
      * @param  list<int>        $cpg_aids
-     * @param  array<int, int>  $album_id_map   CPG aid → Lumora album_id
+     * @param  array<int, int>  $album_id_map  CPG aid → Lumora album_id
      * @return array<int, string>  Lumora album_id → folder
      */
     private function fetchLumoraFolders(\PDO $pdo, string $pre, array $cpg_aids, array $album_id_map): array
@@ -463,7 +582,6 @@ final class CoppermineImporter
         if (empty($lumora_ids)) {
             return [];
         }
-
         $placeholders = implode(',', array_fill(0, count($lumora_ids), '?'));
         $stmt = $pdo->prepare(
             "SELECT `id`, `folder` FROM `{$pre}albums` WHERE `id` IN ({$placeholders})"
@@ -478,7 +596,7 @@ final class CoppermineImporter
 
     /**
      * Decode Coppermine HTML-entity-encoded text to plain UTF-8.
-     * Coppermine stores titles/descriptions with HTML entities (e.g. &#039;).
+     * CPG stores titles and descriptions with HTML entities (e.g. &#039;).
      */
     private function decodeCpgText(string $text): string
     {
@@ -486,9 +604,8 @@ final class CoppermineImporter
     }
 
     /**
-     * Normalise Coppermine's `approved` field to an integer 0 or 1.
-     *
-     * CPG 1.4.x stores ENUM('YES','NO'); some versions use tinyint 0/1.
+     * Normalise CPG's `approved` field to integer 0 or 1.
+     * CPG 1.4.x uses ENUM('YES','NO'); later versions use tinyint.
      */
     private function normalizeApproved(mixed $value): int
     {
@@ -499,8 +616,7 @@ final class CoppermineImporter
     }
 
     /**
-     * Normalise Coppermine's `added` field to a MySQL datetime string.
-     *
+     * Normalise CPG's `added` / `ctime` field to a MySQL datetime string.
      * CPG 1.5+ stores datetime; older versions may store a Unix timestamp int.
      */
     private function normalizeDate(mixed $value): string
@@ -511,7 +627,6 @@ final class CoppermineImporter
         if (is_numeric($value)) {
             return date('Y-m-d H:i:s', (int) $value);
         }
-        // Already a datetime string — pass through
         return (string) $value;
     }
 }
