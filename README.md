@@ -51,11 +51,14 @@ Lumora/
 │   ├── ajax_integrity_delete.php  AJAX endpoint for deleting orphaned records
 │   ├── ajax_dimensions.php     AJAX endpoint for reload-dimensions chunks
 │   ├── ajax_thumbs.php         AJAX endpoint for thumbnail regeneration chunks
+│   ├── ajax_update_check.php   AJAX endpoint for forced update check
 │   ├── categories.php          Category management
 │   ├── config.php              Gallery settings, export/import
 │   ├── dashboard.php           Stats overview
-│   ├── images.php               Image management (edit, delete, move, bulk actions)
+│   ├── images.php              Image management (edit, delete, move, bulk actions)
+│   ├── migrate.php             Migration hub — discovers and launches importer plugins
 │   ├── tools.php               Admin tools (File Integrity Check, Reload Dimensions, Regenerate Thumbnails)
+│   ├── update.php              Update checker — version status and manual check
 │   ├── login.php / logout.php
 │   └── admin.css
 ├── albums/                     Image storage — original + thumb_* thumbnails

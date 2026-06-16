@@ -322,6 +322,28 @@
   font-size: .82rem;
 }
 
+/* ── Card info rows (album / category meta) ───────────────── */
+/* Replaces the old <small class="text-muted"> inline string.  */
+/* Each stat gets its own centred, tinted row.                  */
+.lum-card-meta { margin-top: .3rem; }
+
+.lum-card-meta span {
+  display:     block;
+  text-align:  center;
+  padding:     .2rem .4rem;
+  font-size:   .72rem;
+  color:       #444;
+  line-height: 1.3;
+}
+
+/* Image / sub-category count — light accent tint */
+.lum-card-images,
+.lum-card-subcats { background: #ede8f5; }
+
+/* Views / album count — body-background tint */
+.lum-card-views,
+.lum-card-albums  { background: var(--fs-body-bg); }
+
 /* ── Thumbnail grid ───────────────────────────────────────── */
 .lum-thumbgrid {
   display: grid;

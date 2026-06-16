@@ -6,6 +6,84 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.7.0] — 2026-06-16
+
+### Added
+
+- **Update Checker — Phase 1** (`include/services/UpdateService.php`, `admin/update.php`,
+  `admin/ajax_update_check.php`, `admin/includes/admin_helpers.php`, `admin/dashboard.php`,
+  `include/bootstrap.php`):
+  Lumora can now check for newer releases against a JSON endpoint hosted on the Lumora
+  website (`https://code.unloved-hert.net/lumora/update.json`). No gallery content, user
+  data, or identifying information is transmitted — only a plain GET request is made.
+
+  - **`UpdateService`** (`include/services/UpdateService.php`) — new static service class.
+    Fetches the remote endpoint, caches the result in the config table for 24 hours, and
+    exposes `check(bool $force)` for a full status check, `getCachedStatus()` for a
+    cache-only read (used in the nav and dashboard to avoid any I/O on every page load),
+    `hasCachedUpdate(): bool` for the nav badge, and `isCacheExpired(): bool` so the
+    Updates page can auto-trigger an AJAX refresh when the cache is stale.
+    `version_compare()` is used for semantic version comparison.
+    Network failures fall back to the stale cache so admins always see the last known
+    state rather than a blank error. A temporary `set_error_handler` / `restore_error_handler`
+    pair suppresses the E_WARNING that `file_get_contents()` emits on TCP failure without
+    using the `@` operator.
+
+  - **`admin/update.php`** — new admin page showing installed version, current status
+    (up to date / update available / error / not checked), last-checked timestamp,
+    changelog and download links when an update is available, a PHP-version compatibility
+    warning when the new release requires a higher PHP version, and a **Check for Updates
+    Now** button. The page renders from cache only (no PHP-level HTTP call); if the cache
+    is expired, JS auto-triggers an AJAX check after DOM load to avoid server-side
+    blocking.
+
+  - **`admin/ajax_update_check.php`** — AJAX endpoint that calls
+    `UpdateService::check(force: true)` and returns the full status array as JSON.
+    Validates CSRF and admin authentication.
+
+  - **`admin/includes/admin_helpers.php`** — **Updates** (🔔) nav item added between
+    Import and Account. A red `!` badge appears next to the label whenever the cached
+    status shows an update is available (no HTTP call — reads config cache only).
+
+  - **`admin/dashboard.php`** — dismissible info-bar shown at the top of the dashboard
+    when the cached status indicates an update is available. Includes inline changelog
+    and download links plus a **Details** link to `update.php`. No HTTP call is made
+    at dashboard render time.
+
+  - **`include/bootstrap.php`** — `UpdateService.php` loaded in step 7 alongside the
+    other service classes.
+
+  **Update endpoint format** — the JSON file hosted at the Lumora website must follow
+  this shape (all fields optional except `latest_version`):
+  ```json
+  {
+    "latest_version": "1.6.0",
+    "minimum_php":    "8.2",
+    "release_date":   "2026-06-15",
+    "download_url":   "https://github.com/{owner}/lumora/releases/download/v1.6.0/lumora-v1.6.0.zip",
+    "changelog_url":  "https://code.unloved-hert.net/lumora/changelog"
+  }
+  ```
+  Additional fields may be added in future without breaking existing installations.
+
+### Changed
+
+- **`renderCatgrid()` — album / category card info restructured as individual rows**
+  (`include/services/ThemeRenderer.php`, `themes/*/fansite.css`,
+  `themes/default/lumora.css`):
+  Album and category cards previously showed a single `<small class="text-muted">`
+  string joining all info with ` — ` (e.g. "2,704 images — 527 views"). Each piece
+  of info is now its own `<span>` inside a `.lum-card-meta` wrapper div, enabling
+  themes to colour, center, and space each stat independently.
+  - Albums emit `.lum-card-images` and `.lum-card-views` spans.
+  - Categories emit `.lum-card-subcats` and/or `.lum-card-albums` spans.
+  - All three bundled themes receive `.lum-card-meta` CSS: the default theme uses a
+    light blue / neutral-gray pair; `classic-fansite` uses a light purple-tint /
+    body-background pair; the GoT `aknightofthesevenkindoms` theme uses the
+    Coppermine-matched teal / warm-beige pair shared with the thumbnail caption rows.
+
+---
+
 ## [1.6.0] — 2026-06-15
 
 ### Added

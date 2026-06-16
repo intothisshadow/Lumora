@@ -77,16 +77,22 @@ function lum_admin_page(string $title, string $content, string $active = ''): ne
           . '</div>'
         : '';
 
+    // Badge on the Updates nav item — cache-only, no HTTP call.
+    $update_badge = UpdateService::hasCachedUpdate()
+        ? ' <span class="badge bg-danger" style="font-size:.6rem;vertical-align:middle;line-height:1">!</span>'
+        : '';
+
     $nav_items = [
-        'dashboard'   => ['icon' => '📊', 'label' => 'Dashboard',     'url' => 'dashboard.php'],
-        'batch'       => ['icon' => '⬆️', 'label' => 'Batch Add',     'url' => 'batch.php'],
-        'categories'  => ['icon' => '📁', 'label' => 'Categories',    'url' => 'categories.php'],
-        'albums'      => ['icon' => '🖼️', 'label' => 'Albums',        'url' => 'albums.php'],
-        'images'      => ['icon' => '📸', 'label' => 'Images',        'url' => 'images.php'],
-        'config'      => ['icon' => '⚙️', 'label' => 'Configuration', 'url' => 'config.php'],
-        'tools'       => ['icon' => '🔧', 'label' => 'Tools',         'url' => 'tools.php'],
-        'migrate'     => ['icon' => '📥', 'label' => 'Import',        'url' => 'migrate.php'],
-        'account'     => ['icon' => '👤', 'label' => 'Account',       'url' => 'account.php'],
+        'dashboard'  => ['icon' => '📊', 'label' => 'Dashboard',              'url' => 'dashboard.php'],
+        'batch'      => ['icon' => '⬆️', 'label' => 'Batch Add',              'url' => 'batch.php'],
+        'categories' => ['icon' => '📁', 'label' => 'Categories',             'url' => 'categories.php'],
+        'albums'     => ['icon' => '🖼️', 'label' => 'Albums',                 'url' => 'albums.php'],
+        'images'     => ['icon' => '📸', 'label' => 'Images',                 'url' => 'images.php'],
+        'config'     => ['icon' => '⚙️', 'label' => 'Configuration',          'url' => 'config.php'],
+        'tools'      => ['icon' => '🔧', 'label' => 'Tools',                  'url' => 'tools.php'],
+        'migrate'    => ['icon' => '📥', 'label' => 'Import',                 'url' => 'migrate.php'],
+        'updates'    => ['icon' => '🔔', 'label' => 'Updates' . $update_badge, 'url' => 'update.php'],
+        'account'    => ['icon' => '👤', 'label' => 'Account',                'url' => 'account.php'],
     ];
 
     $nav_html = '';

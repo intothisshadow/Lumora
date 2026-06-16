@@ -385,6 +385,10 @@ HTML;
     /**
      * Render a Bootstrap card grid for categories or albums.
      *
+     * Each item's meta (image count, views, album count, sub-categories) is
+     * rendered as individually coloured stacked rows via .lum-card-meta spans
+     * so themes can style each piece of info independently.
+     *
      * @param array  $items  Rows from get_categories() or get_albums().
      * @param string $type   'category' or 'album'.
      */
@@ -399,22 +403,39 @@ HTML;
 
         foreach ($items as $item) {
             if ($type === 'album') {
-                $url   = h($base . 'album.php?album=' . (int) $item['id']);
-                $title = h($item['title']);
-                $count = isset($item['image_count'])
-                    ? number_format((int) $item['image_count']) . ' image' . ((int) $item['image_count'] !== 1 ? 's' : '')
-                    : '';
+                $url      = h($base . 'album.php?album=' . (int) $item['id']);
+                $title    = h($item['title']);
+                $img_n    = isset($item['image_count']) ? (int) $item['image_count'] : null;
+                $hits_val = (int) ($item['hits'] ?? 0);
+
+                $meta_html  = '<div class="lum-card-meta">';
+                if ($img_n !== null) {
+                    $meta_html .= '<span class="lum-card-images">'
+                        . number_format($img_n) . ' image' . ($img_n !== 1 ? 's' : '')
+                        . '</span>';
+                }
+                $meta_html .= '<span class="lum-card-views">'
+                    . number_format($hits_val) . ' view' . ($hits_val !== 1 ? 's' : '')
+                    . '</span>';
+                $meta_html .= '</div>';
             } else {
                 $url   = h($base . '?cat=' . (int) $item['id']);
                 $title = h($item['name']);
-                $parts = [];
+
+                $meta_html = '<div class="lum-card-meta">';
                 if (!empty($item['subcategory_count']) && (int) $item['subcategory_count'] > 0) {
-                    $parts[] = (int) $item['subcategory_count'] . ' sub-' . ((int) $item['subcategory_count'] !== 1 ? 'categories' : 'category');
+                    $n = (int) $item['subcategory_count'];
+                    $meta_html .= '<span class="lum-card-subcats">'
+                        . $n . ' sub-' . ($n !== 1 ? 'categories' : 'category')
+                        . '</span>';
                 }
                 if (!empty($item['album_count'])) {
-                    $parts[] = number_format((int) $item['album_count']) . ' album' . ((int) $item['album_count'] !== 1 ? 's' : '');
+                    $n = (int) $item['album_count'];
+                    $meta_html .= '<span class="lum-card-albums">'
+                        . number_format($n) . ' album' . ($n !== 1 ? 's' : '')
+                        . '</span>';
                 }
-                $count = implode(', ', $parts);
+                $meta_html .= '</div>';
             }
 
             $thumb_html = self::renderItemThumb($item, $type, $url);
@@ -428,7 +449,7 @@ HTML;
     {$thumb_html}
     <div class="card-body p-2">
       <h6 class="card-title mb-0"><a href="{$url}">{$title}</a></h6>
-      <small class="text-muted">{$count}</small>
+      {$meta_html}
       {$desc_html}
     </div>
   </div>

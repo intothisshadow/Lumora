@@ -4,6 +4,79 @@ Long-term archive of completed work, migrated from TODO.md on release.
 
 ---
 
+## v1.7.0 — Released 2026-06-16
+
+### Update Checker (Phase 1)
+
+- [x] `UpdateService` static service class — fetches remote update endpoint, caches result
+  in config table for 24 hours, exposes `check()`, `getCachedStatus()`, `hasCachedUpdate()`,
+  and `isCacheExpired()`. Uses `version_compare()` for semantic comparison. Falls back to
+  stale cache on network failure. No gallery data is ever transmitted.
+- [x] `admin/update.php` — Updates admin page showing installed version, status badge,
+  last-checked timestamp, changelog/download links when an update is available, and
+  PHP-version compatibility warning. Renders from cache only at PHP time; JS auto-triggers
+  AJAX check when cache is expired to avoid server-side blocking.
+- [x] `admin/ajax_update_check.php` — AJAX endpoint for forced update check; returns full
+  status array as JSON; validates CSRF and admin authentication.
+- [x] `admin/includes/admin_helpers.php` — Updates (🔔) nav item added between Import and
+  Account. Red `!` badge shown whenever cached status indicates an update (no HTTP call).
+- [x] `admin/dashboard.php` — Dismissible info-bar shown when cached status indicates an
+  update is available; includes changelog/download links; no HTTP call at render time.
+- [x] `include/bootstrap.php` — `UpdateService.php` loaded in step 7 alongside other
+  service classes.
+
+### Bug Fixes
+
+- [x] Albums missing added/updated date in album info display.
+- [x] Thumbnails missing added/updated date in thumbnail info display.
+- [x] Album and thumbnail info stats (views, resolution, image counts) restructured
+  from a single inline string into individually styled rows.
+
+---
+
+## v1.6.0 — Released 2026-06-15
+
+### Coppermine Importer Plugin (`plugins/coppermine-importer/`)
+
+- [x] Official migration plugin for importing Coppermine Gallery (CPG 1.4–1.6) categories,
+  albums, and image metadata into Lumora. Metadata-first; image files are not moved.
+- [x] `version.php` — single source of truth for plugin version (`LUMORA_CPG_IMPORTER_VERSION`).
+- [x] `plugin.json` — plugin manifest for discovery by the migration hub.
+- [x] `CoppermineImporter` class — separate PDO connection to CPG database; keyset-paginated
+  `importCategories()`, `importAlbums()`, `importImages()`, and `validate()` methods;
+  schema-adaptive SELECT handles CPG column name variations across versions.
+- [x] `admin/index.php` — four-step admin wizard: Credentials → Preview → Import → Done.
+  Stores state and ID maps in `$_SESSION`; re-import warning with confirmation checkbox.
+- [x] `admin/ajax_import.php` — AJAX chunk processor for three import actions plus `finish`;
+  CSRF and admin auth validated on every call; integer-key-preserving session maps.
+- [x] Stop Import button — halts after current in-flight batch without data loss.
+- [x] Import status tracking — records source, date, counts, and plugin version in
+  `{PREFIX}migration_status` after successful import.
+- [x] Re-import protection — detects prior migration and requires confirmation before
+  re-running; warns that duplicates may result.
+- [x] Preserve existing Coppermine `albums/` folder structure — no file renaming or moves
+  required; album paths derived from `cpg_pictures.filepath` with `keyword` fallback.
+
+### Migration Framework (Core)
+
+- [x] `MigrationService` static service class — import status tracking, event logging,
+  plugin discovery (scans `LUMORA_PLUGINS_PATH/*/plugin.json`), and version compatibility
+  checking.
+- [x] `admin/migrate.php` — migration hub: discovers importer plugins, shows each as a card
+  with name, description, version, compatibility badge, and previous migration status.
+- [x] `admin/includes/admin_helpers.php` — Import (📥) nav entry added.
+- [x] `include/bootstrap.php` — `LUMORA_PLUGINS_PATH` constant and `MigrationService.php`
+  loaded in step 7.
+- [x] `install/schema.sql` DB v6 — `{PREFIX}migration_status` and `{PREFIX}migration_log`
+  tables.
+
+### Bug Fixes
+
+- [x] Album cards missing view count — `renderCatgrid()` displayed image count but omitted
+  `hits`; fixed by rendering both values with spans for per-theme styling.
+
+---
+
 ## v1.5.0 — Released 2026-06-15
 
 ### Technical Debt (V1 → V2 Prerequisites)

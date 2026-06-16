@@ -15,6 +15,31 @@ $stats   = get_gallery_stats();
 $base    = h(lumora_base_url() . 'admin/');
 $latest  = get_latest_images(6);
 
+// ── Update notice (cache-only — no HTTP call) ────────────────────────────────
+$update_notice = '';
+$upd = UpdateService::getCachedStatus();
+if ($upd['status'] === 'update_available' && $upd['latest'] !== null) {
+    $upd_ver  = h($upd['latest']);
+    $upd_dl   = $upd['download_url']  !== null ? h($upd['download_url'])  : '';
+    $upd_cl   = $upd['changelog_url'] !== null ? h($upd['changelog_url']) : '';
+    $upd_btns = '';
+    if ($upd_cl) {
+        $upd_btns .= '<a href="' . $upd_cl . '" target="_blank" rel="noopener"'
+                   . ' class="btn btn-sm btn-outline-secondary ms-2">View Changelog</a>';
+    }
+    if ($upd_dl) {
+        $upd_btns .= '<a href="' . $upd_dl . '" target="_blank" rel="noopener"'
+                   . ' class="btn btn-sm btn-primary ms-2">Download ' . $upd_ver . '</a>';
+    }
+    $update_notice = '<div class="alert alert-info alert-dismissible fade show py-2 mb-4" role="alert">'
+        . '🔔 <strong>Lumora ' . $upd_ver . ' is available.</strong> '
+        . 'You are running ' . h(LUMORA_VERSION) . '.'
+        . $upd_btns
+        . ' <a href="' . $base . 'update.php" class="btn btn-sm btn-outline-secondary ms-2">Details</a>'
+        . '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>'
+        . '</div>';
+}
+
 // ── Stat cards ─────────────────────────────────────────────────────────────
 $s_cat  = number_format($stats['categories']);
 $s_alb  = number_format($stats['albums']);
@@ -91,5 +116,5 @@ if (!empty($latest)) {
     $latest_html .= '</div>';
 }
 
-$content = $stat_html . $ql . $latest_html;
+$content = $update_notice . $stat_html . $ql . $latest_html;
 lum_admin_page('Dashboard', $content, 'dashboard');
