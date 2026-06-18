@@ -311,6 +311,11 @@ HTML;
             $w         = (int) $img['width'];
             $h         = (int) $img['height'];
             $img_id    = (int) $img['id'];
+            $added_str = '';
+            if (!empty($img['added_at'])) {
+                $added_ts = strtotime((string) $img['added_at']);
+                if ($added_ts !== false) $added_str = date('j M Y', $added_ts);
+            }
 
             $html .= '<figure class="lum-thumb-item">';
             $html .= '<a href="' . h($orig_url) . '"'
@@ -324,6 +329,7 @@ HTML;
             $html .= '<figcaption class="lum-thumb-caption">';
             if ($res) $html .= '<span class="lum-resolution">' . $res . '</span>';
             $html .= '<span class="lum-views">' . $views . ' views</span>';
+            if ($added_str) $html .= '<span class="lum-thumb-date">' . h($added_str) . '</span>';
             $html .= '</figcaption>';
             $html .= '</figure>';
         }
@@ -418,6 +424,18 @@ HTML;
                 $meta_html .= '<span class="lum-card-views">'
                     . number_format($hits_val) . ' view' . ($hits_val !== 1 ? 's' : '')
                     . '</span>';
+                // Prefer the most recent approved image's added_at (reflects when
+                // new content was actually last added); fall back to the album's
+                // own created_at for albums that have no images yet.
+                $updated_raw = $item['latest_added_at'] ?? $item['created_at'] ?? null;
+                if (!empty($updated_raw)) {
+                    $updated_ts = strtotime((string) $updated_raw);
+                    if ($updated_ts !== false) {
+                        $meta_html .= '<span class="lum-card-date">Updated '
+                            . h(date('j M Y', $updated_ts))
+                            . '</span>';
+                    }
+                }
                 $meta_html .= '</div>';
             } else {
                 $url   = h($base . '?cat=' . (int) $item['id']);

@@ -200,6 +200,28 @@ The template engine discovers any folder inside `themes/` that contains a
 | `theme.php` | No | Loaded before token replacement; can define helper functions |
 | `README.md` | No | Documentation only |
 
+### Theme metadata (optional)
+
+You can identify your theme by adding a CSS header comment to the very top of
+its primary stylesheet — the first `{THEME_URL}*.css` link in `template.html`
+(for this theme, that's `fansite.css` itself, even if you override values via
+`custom.css`):
+
+```css
+/*
+ * Theme Name: My Fandom Theme
+ * Author: Your Name
+ * Design URI: https://example.com
+ */
+```
+
+`Theme Name`, `Author`, and `Design URI` are the recognized fields; all are
+optional and any other lines in the comment are ignored. When set, `Theme Name`
+becomes the label shown in the Active Theme dropdown (instead of the raw folder
+name), and all three fields appear in a reference table in Admin → Configuration
+→ Appearance. Skipping the header entirely is fine — the folder name is used as
+a fallback display name.
+
 ### Available template tokens
 
 | Token | Contains |

@@ -160,14 +160,40 @@ $processor_status = extension_loaded('imagick')
         ? '⚠ GD library (fallback — install the PHP imagick extension for better quality)'
         : '✗ None found — thumbnail generation disabled');
 
+// Theme metadata (Theme Name / Author / Design URI), read from each theme's
+// primary stylesheet CSS header comment via lumora_get_theme_meta(). Falls
+// back to the folder name when a theme has no metadata header.
 $themes = lumora_list_themes();
+$theme_meta = [];
+foreach ($themes as $t) {
+    $theme_meta[$t] = lumora_get_theme_meta($t);
+}
+
 $theme_opts = '';
 foreach ($themes as $t) {
     $sel = $t === $cfg['theme'] ? ' selected' : '';
-    $theme_opts .= '<option value="' . h($t) . '"' . $sel . '>' . h(ucfirst($t)) . '</option>';
+    $theme_opts .= '<option value="' . h($t) . '"' . $sel . '>' . h($theme_meta[$t]['name']) . '</option>';
 }
 if (empty($themes)) {
     $theme_opts = '<option value="default" selected>default (no themes found)</option>';
+}
+
+// Reference table of installed themes shown beneath the selector.
+$theme_rows = '';
+foreach ($themes as $t) {
+    $m        = $theme_meta[$t];
+    $author_h = $m['author'] !== '' ? h($m['author']) : '<span class="text-muted">&mdash;</span>';
+    $design_h = $m['design_uri'] !== ''
+        ? '<a href="' . h($m['design_uri']) . '" target="_blank" rel="noopener">' . h($m['design_uri']) . '</a>'
+        : '<span class="text-muted">&mdash;</span>';
+    $theme_rows .= '<tr><td>' . h($m['name']) . '</td><td><code>' . h($t) . '</code></td>'
+        . '<td>' . $author_h . '</td><td>' . $design_h . '</td></tr>';
+}
+$theme_table = '';
+if ($theme_rows !== '') {
+    $theme_table = '<table class="table table-sm table-borderless align-middle mb-0 mt-2" style="max-width:680px">'
+        . '<thead><tr><th>Theme</th><th>Folder</th><th>Author</th><th>Design URI</th></tr></thead>'
+        . '<tbody>' . $theme_rows . '</tbody></table>';
 }
 
 // Pre-compute values safe for use in HTML attributes.
@@ -232,7 +258,8 @@ $content = <<<HTML
     <div class="mb-3">
       <label class="form-label fw-semibold">Active Theme</label>
       <select name="theme" class="form-select" style="max-width:220px">{$theme_opts}</select>
-      <div class="form-text">Themes are folders inside <code>themes/</code> that contain a <code>template.html</code>.</div>
+      <div class="form-text">Themes are folders inside <code>themes/</code> that contain a <code>template.html</code>. Display name, author, and design URI are read from a <code>Theme Name</code> / <code>Author</code> / <code>Design URI</code> CSS header comment at the top of each theme's primary stylesheet (the first theme-relative stylesheet linked in <code>template.html</code>); a theme with no such header falls back to its folder name.</div>
+      {$theme_table}
     </div>
 
     <div class="mb-3">

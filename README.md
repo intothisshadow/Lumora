@@ -164,6 +164,18 @@ Two themes are included:
 - **`default`** — Bootstrap 5 responsive layout with a dark navbar. Clean and neutral; good starting point for any site.
 - **`classic-fansite`** — Traditional fixed-width fansite layout (2000s–2010s fandom era). Features a full-bleed banner image area, sticky navigation bar, and a centred content panel against a dark outer background. Every design decision is exposed as a CSS custom property, with five ready-made fandom colour presets (dark red/fantasy, ocean blue/sci-fi, forest green/nature, rose gold/pop, midnight gold/historical) documented in `themes/classic-fansite/README.md`. The same file covers how to create a new derived theme in four steps.
 
+A theme can optionally declare itself via a CSS header comment at the top of its primary stylesheet (the first `{THEME_URL}*.css` link found in `template.html`), in the same spirit as WordPress theme headers:
+
+```css
+/*
+ * Theme Name: My Theme
+ * Author: Your Name
+ * Design URI: https://example.com
+ */
+```
+
+Recognized fields are `Theme Name`, `Author`, and `Design URI`. When present, they're shown as the theme's display name in the Active Theme dropdown and in a reference table in Admin → Configuration → Appearance. The header is entirely optional — themes without one still work normally, falling back to the folder name.
+
 ### Thumbnail generation
 - **Imagick PHP extension** preferred — auto-detected, no path configuration needed. Uses IM7 Q16-HDRI for high-quality Lanczos resizing, EXIF auto-orientation, and metadata stripping.
 - **GD library** fallback if the Imagick extension is not loaded.

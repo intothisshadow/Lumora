@@ -12,6 +12,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Theme Metadata from CSS Headers** (`include/functions.php`, `admin/config.php`,
+  `themes/default/lumora.css`, `themes/classic-fansite/fansite.css`):
+  Theme display names, author, and design URI can now be declared in a
+  WordPress-style CSS header comment at the top of a theme's primary stylesheet,
+  instead of relying on the folder name alone.
+
+  - **`lumora_theme_primary_stylesheet(string $theme): ?string`** — locates a
+    theme's primary stylesheet by finding the first theme-relative
+    (`{THEME_URL}`) stylesheet `<link>` in its `template.html`, in document
+    order. For the bundled themes this resolves to `lumora.css` (default) and
+    `fansite.css` (classic-fansite and its derivatives) — the base stylesheet
+    linked before any optional `custom.css` override.
+
+  - **`lumora_get_theme_meta(string $theme): array`** — reads `Theme Name`,
+    `Author`, and `Design URI` from the first CSS comment block in the primary
+    stylesheet. Unrecognised fields are ignored; any missing field is returned
+    empty, and `name` falls back to the directory name when no header is
+    present at all, so every theme always has a usable display name.
+
+  - **`admin/config.php`** — the **Active Theme** dropdown on **Configuration
+    → Appearance** now shows each theme's `Theme Name` instead of
+    `ucfirst($folder)`, while the submitted `<option>` value remains the
+    folder name so existing `theme` config values keep working unchanged. A
+    small reference table (Theme / Folder / Author / Design URI) is rendered
+    beneath the selector for every installed theme; Design URI links open in
+    a new tab.
+
+  - **Core themes updated** with a standardised metadata header
+    (`Theme Name`, `Author`) at the very top of their primary stylesheet:
+    `themes/default/lumora.css` ("Default") and
+    `themes/classic-fansite/fansite.css` ("Classic Fansite"). Both existing
+    decorative file-header comments are preserved unchanged immediately below
+    the new metadata block.
+
 - **Admin Password Recovery** (`admin/forgot_password.php`, `admin/reset_password.php`,
   `include/auth.php`, `admin/login.php`, `install/schema.sql`, `version.php`):
   Admins who have lost their password can now generate a secure reset link without
@@ -155,6 +189,83 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     ADD KEY `title`    (`title`(191));
   ```
   Replace `lum_` with your actual table prefix.
+  
+  
+  
+### Fixed
+
+- **Albums and thumbnails missing their added/updated date — regression from a prior fix lost on a file overwrite** (`include/services/ThemeRenderer.php`, `themes/default/lumora.css`, `themes/classic-fansite/fansite.css`):
+  `TODO.md` flagged that both the album info display and the thumbnail info display
+  were missing their added/updated date, noting the date display had "already once
+  been fixed" (recorded as completed in `docs/HISTORY.md` under the v1.7.0 Bug Fixes
+  section). The date-rendering code was absent from the current `ThemeRenderer.php`
+  and no `.lum-card-date` / `.lum-thumb-date` CSS existed in either core theme,
+  confirming the fix was lost when the file was overwritten with a pre-fix version —
+  the same class of regression already documented for `install/index.php` in the
+  1.7.0 changelog entry. Re-implemented:
+  - `ThemeRenderer::renderCatgrid()` (album branch) now appends a `.lum-card-date`
+    span reading "Added {j M Y}", derived from the album's existing `created_at`
+    column, alongside the existing image-count and view-count spans.
+  - `ThemeRenderer::renderThumbgrid()` now appends a `.lum-thumb-date` span to each
+    thumbnail's `<figcaption>`, derived from the image's existing `added_at` column.
+    The span is full-width (`flex: 1 0 100%`) so it wraps onto its own centred row
+    below the resolution/views row rather than competing for horizontal space.
+  - Both bundled core themes (`default`, `classic-fansite`) receive matching
+    `.lum-card-date` (tinted row, consistent with the existing `.lum-card-images` /
+    `.lum-card-views` pattern) and `.lum-thumb-date` (centred caption row with a
+    📅 icon, consistent with the existing `.lum-views` 👁 icon) rules. No database
+    migration or service-layer change was required — `created_at` and `added_at`
+    were already selected by `GalleryService::getAlbums()`/`getAlbum()` and every
+    image-fetching method respectively.
+
+- **Sort bar overflowed past the viewport edge on narrow phones** (`themes/default/lumora.css`,
+  `themes/classic-fansite/fansite.css`):
+  `ThemeRenderer::renderSortControls()` renders the five sort options (Default,
+  Newest, Oldest, Most Viewed, Filename) inside a single Bootstrap `.btn-group`,
+  which by design is a non-wrapping flex item with joined-button negative margins.
+  On phones narrower than ~575px the group has no room to fit all five buttons and
+  overflows past the right edge of the viewport instead of wrapping, confirmed on
+  the `aknightofthesevenkindoms` theme (a `classic-fansite` derivative) and present
+  identically in both bundled core themes. Fixed by adding a `@media (max-width:
+  575px)` rule to each theme's existing mobile breakpoint block that forces
+  `.lum-sort-bar .btn-group` to `display: flex; flex-wrap: wrap`, sizes each `.btn`
+  with `flex: 1 1 auto`, and resets the joined-row-only negative `margin-left` and
+  squared-off corners (`border-radius` restored per-button) so wrapped rows render
+  cleanly. `default/lumora.css` uses `var(--lum-card-radius)`; `classic-fansite/fansite.css`
+  uses `var(--fs-radius)`, consistent with each theme's existing variable scheme.
+
+- **Category list header labels overflowed past the viewport edge on narrow phones**
+  (`themes/default/lumora.css`, `themes/classic-fansite/fansite.css`):
+  The existing `@media (max-width: 575px)` rule shrinks the `.lum-catlist-col-albums`
+  and `.lum-catlist-col-images` *data* cells to a 56px column width, but never touched
+  the matching `.lum-catlist-header-cell--albums` / `--images` *header* labels
+  ("ALBUMS" / "IMAGES"), which kept the full `.75rem` font-size, `.75rem` padding, and
+  `.05em` letter-spacing — far too wide for a 56px column, so "IMAGES" ran past the
+  card and viewport edge (confirmed on the `aknightofthesevenkindoms` theme, a
+  `classic-fansite` derivative, and present identically in both core themes). Fixed by
+  shrinking the header cells to `.6rem` font-size, `.15rem` horizontal padding, and
+  zero letter-spacing within the same mobile breakpoint, matching the row cells.
+
+- corrected the official Lumora Gallery website URL in `ThemeRenderer.php`
+
+- **Album cards showed the Lumora import date instead of when content was actually last added** (`include/services/GalleryService.php`, `include/services/ThemeRenderer.php`):
+  Follow-up to the date-display fix above. The album card's date span (added in that
+  fix) read `albums.created_at` — the timestamp the album row was inserted/imported,
+  set once and never updated again — so albums that received new images long after
+  import (e.g. via the Coppermine importer) kept showing the original import date
+  under the label "Added", even though `images.added_at` was correct for every
+  individual image. `GalleryService::getLatestUpdatedAlbums()` already computed the
+  correct value (`MAX(images.added_at)` as `latest_added_at`) for the home page's
+  "Recently Updated" section, but `ThemeRenderer::renderCatgrid()` ignored that field
+  and used `created_at` regardless of which query supplied the row. Fixed:
+  - `GalleryService::getAlbums()` now also selects `latest_added_at` via the same
+    `MAX(i2.added_at)` subquery already used by `getLatestUpdatedAlbums()`, so
+    category-page album listings carry the same field.
+  - `ThemeRenderer::renderCatgrid()` (album branch) now prefers `latest_added_at`
+    over `created_at` for the date span, falling back to `created_at` only for
+    albums with no approved images yet, and relabels the span from "Added" to
+    "Updated" to reflect what the date now represents. No CSS or schema change
+    required — `.lum-card-date` styling and the `created_at` column are unchanged.
 
 ---
 

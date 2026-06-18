@@ -199,6 +199,72 @@ function lumora_list_themes(): array
     return $themes;
 }
 
+/**
+ * Locate a theme's primary stylesheet: the first theme-relative ({THEME_URL})
+ * stylesheet <link> found in its template.html, in document order.
+ *
+ * This is the file CSS header metadata (Theme Name / Author / Design URI) is
+ * read from. For the bundled themes this resolves to lumora.css (default) and
+ * fansite.css (classic-fansite and its derivatives) — the base stylesheet
+ * linked before any optional custom.css override.
+ *
+ * @return string|null Absolute filesystem path, or null if none could be found.
+ */
+function lumora_theme_primary_stylesheet(string $theme): ?string
+{
+    $tpl_path = lumora_theme_path($theme) . 'template.html';
+    if (!is_readable($tpl_path)) return null;
+
+    $html = file_get_contents($tpl_path, false, null, 0, 16384);
+    if ($html === false) return null;
+
+    if (!preg_match('/\{THEME_URL\}([A-Za-z0-9_\-.]+\.css)/', $html, $m)) {
+        return null;
+    }
+
+    $css_path = lumora_theme_path($theme) . $m[1];
+    return is_readable($css_path) ? $css_path : null;
+}
+
+/**
+ * Read theme metadata from the CSS header comment of a theme's primary
+ * stylesheet, WordPress-style (Theme Name / Author / Design URI on their own
+ * lines inside the first CSS comment block — see e.g. themes/default/lumora.css
+ * for a working example). Only the first comment block in the file is
+ * inspected; unrecognised fields are ignored. Falls back to the directory name
+ * for `name` when no metadata is present, so every theme always has a usable
+ * display name.
+ *
+ * @return array{name: string, author: string, design_uri: string}
+ */
+function lumora_get_theme_meta(string $theme): array
+{
+    $meta = [
+        'name'       => $theme,
+        'author'     => '',
+        'design_uri' => '',
+    ];
+
+    $css_path = lumora_theme_primary_stylesheet($theme);
+    if ($css_path === null) return $meta;
+
+    $head = file_get_contents($css_path, false, null, 0, 8192);
+    if ($head === false) return $meta;
+
+    if (!preg_match('#/\*(.*?)\*/#s', $head, $m)) return $meta;
+    $comment = $m[1];
+
+    $fields = ['name' => 'Theme Name', 'author' => 'Author', 'design_uri' => 'Design URI'];
+    foreach ($fields as $key => $label) {
+        if (preg_match('/^[ \t*]*' . preg_quote($label, '/') . '\s*:\s*(.+)$/mi', $comment, $mm)) {
+            $value = trim($mm[1]);
+            if ($value !== '') $meta[$key] = $value;
+        }
+    }
+
+    return $meta;
+}
+
 // ── Formatting ────────────────────────────────────────────────────────────────
 
 /**

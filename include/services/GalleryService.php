@@ -179,8 +179,18 @@ class GalleryService
     // ── Albums ────────────────────────────────────────────────────────────────
 
     /**
-     * Get albums in a category, with image_count.
+     * Get albums in a category, with image_count and latest_added_at.
      * $sort: 'pos' | 'title' | 'newest' | 'hits'
+     *
+     * latest_added_at is the MAX(added_at) of this album's approved images
+     * (null when the album has no approved images yet). Themes use it instead
+     * of created_at to show when an album was last actually updated with new
+     * content, rather than when the album row itself was created/imported.
+     *
+     * @return list<array{id: int, category_id: int, folder: string, title: string,
+     *                    description: string, visibility: int, pos: int, hits: int,
+     *                    thumb_image_id: int, created_at: string, image_count: int,
+     *                    latest_added_at: string|null}>
      */
     public static function getAlbums(int $category_id, string $sort = 'pos'): array
     {
@@ -192,7 +202,8 @@ class GalleryService
         };
         return LumoraDB::fetchAll(
             "SELECT a.*,
-                 (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
+                 (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count,
+                 (SELECT MAX(i2.added_at) FROM `{PREFIX}images` i2 WHERE i2.album_id = a.id AND i2.approved = 1) AS latest_added_at
              FROM `{PREFIX}albums` a
              WHERE a.category_id = ? AND a.visibility = 0
              ORDER BY {$order}",

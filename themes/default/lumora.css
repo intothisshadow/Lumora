@@ -1,3 +1,8 @@
+/*
+ * Theme Name: Default
+ * Author: Ariane
+ */
+
 /* ============================================================
    Lumora Gallery — Default Theme
    lumora.css
@@ -175,6 +180,9 @@
 .lum-card-views,
 .lum-card-albums  { background: #f8f9fa; }
 
+/* Added date — soft amber tint */
+.lum-card-date { background: #fff8e1; }
+
 /* ── Thumbnail grid ───────────────────────────────────────── */
 .lum-thumbgrid {
   display: grid;
@@ -216,6 +224,7 @@
 
 .lum-thumb-caption {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   padding: .3rem .5rem;
@@ -236,6 +245,18 @@
 
 .lum-views::before {
   content: '👁 ';
+  font-size: .65rem;
+}
+
+/* Added date — own full-width row beneath resolution/views, centred. */
+.lum-thumb-date {
+  flex: 1 0 100%;
+  text-align: center;
+  color: #6c757d;
+}
+
+.lum-thumb-date::before {
+  content: '📅 ';
   font-size: .65rem;
 }
 
@@ -276,6 +297,30 @@
     --lum-gap: .4rem;
   }
   .lum-stat-num { font-size: 1.2rem; }
+
+  /*
+   * Sort bar: Bootstrap's .btn-group is a single non-wrapping flex item,
+   * so on narrow phones the sort buttons overflow past the viewport edge
+   * instead of wrapping. Force the group to wrap and undo the joined-
+   * button negative margins / squared-off corners that only make sense
+   * in a single unbroken row.
+   */
+  .lum-sort-bar { padding: .4rem .55rem; }
+
+  .lum-sort-bar .btn-group {
+    display:   flex;
+    flex-wrap: wrap;
+    width:     100%;
+    gap:       .35rem;
+  }
+
+  .lum-sort-bar .btn-group > .btn {
+    flex:          1 1 auto;
+    margin-left:   0 !important;
+    border-radius: var(--lum-card-radius) !important;
+    font-size:     .75rem;
+    padding:       .3rem .45rem;
+  }
 }
 
 @media (min-width: 1200px) {
@@ -407,5 +452,18 @@
   .lum-catlist-col-images {
     font-size: .85rem;
     padding: .5rem .25rem;
+  }
+
+  /*
+   * Header labels ("ALBUMS" / "IMAGES") inherit the full-width .75rem
+   * font-size + .75rem horizontal padding + .05em letter-spacing from
+   * .lum-catlist-header-cell, which doesn't fit in a 56px column and
+   * overflows past the card/viewport edge. Shrink to match the row cells.
+   */
+  .lum-catlist-header-cell--albums,
+  .lum-catlist-header-cell--images {
+    font-size:      .6rem;
+    padding:         .5rem .15rem;
+    letter-spacing:  0;
   }
 }
