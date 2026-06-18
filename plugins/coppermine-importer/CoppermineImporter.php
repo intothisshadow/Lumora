@@ -415,6 +415,114 @@ final class CoppermineImporter
         return compact('imported', 'skipped', 'missing_files', 'errors', 'done') + ['last_id' => $new_last];
     }
 
+    // ── Metadata sync (category/album cover thumbnails) ────────────────────────
+    //
+    // Companion to the import methods above, used by the standalone metadata
+    // sync tool (admin/sync_metadata.php) to fill in category/album cover
+    // images on an *already-imported* gallery, without a full re-import.
+    //
+    // The import methods above build their CPG-id -> Lumora-id maps only in
+    // memory for the lifetime of one import run; nothing is persisted. So
+    // matching here is done via durable, already-on-disk identifiers instead:
+    //   - Albums:     matched by `folder`, resolved the same way importAlbums()
+    //                 resolves it (cpg_pictures.filepath, falling back to the
+    //                 keyword column).
+    //   - Categories: matched by full name-path from the root, since categories
+    //                 have no folder equivalent to match on.
+
+    /**
+     * Build a preview of category and album cover-thumbnail sync actions.
+     * Read-only — makes no changes to either database.
+     *
+     * @return array{
+     *     categories: list<array{cpg_cid: int, name: string, cpg_thumb_pid: int,
+     *         lumora_id: int|null, current_thumb_image_id: int,
+     *         resolved_image_id: int|null, status: string}>,
+     *     albums: list<array{cpg_aid: int, title: string, folder: string,
+     *         cpg_thumb_pid: int, lumora_id: int|null, current_thumb_image_id: int,
+     *         resolved_image_id: int|null, status: string}>
+     * }
+     */
+    public function previewThumbnailSync(): array
+    {
+        return [
+            'categories' => $this->matchCategoryThumbnails(),
+            'albums'     => $this->matchAlbumThumbnails(),
+        ];
+    }
+
+    /**
+     * Apply the thumbnail sync actions computed by previewThumbnailSync().
+     *
+     * Re-runs the same matching logic fresh rather than trusting any
+     * client-supplied preview state, inside a single Lumora-side transaction.
+     * By default only categories/albums with thumb_image_id = 0 are touched;
+     * pass $overwrite = true to replace existing cover selections as well.
+     *
+     * @return array{updated: int, skipped: int, errors: list<string>}
+     */
+    public function applyThumbnailSync(bool $overwrite): array
+    {
+        $preview = $this->previewThumbnailSync();
+        $updated = 0;
+        $skipped = 0;
+        $errors  = [];
+
+        LumoraDB::beginTransaction();
+        try {
+            foreach ($preview['categories'] as $row) {
+                if ($row['lumora_id'] === null || $row['resolved_image_id'] === null) {
+                    $skipped++;
+                    continue;
+                }
+                if ($row['current_thumb_image_id'] > 0 && !$overwrite) {
+                    $skipped++;
+                    continue;
+                }
+                try {
+                    LumoraDB::update(
+                        'categories',
+                        ['thumb_image_id' => $row['resolved_image_id']],
+                        'id = ?',
+                        [$row['lumora_id']]
+                    );
+                    $updated++;
+                } catch (\Throwable $e) {
+                    $skipped++;
+                    $errors[] = "Category '{$row['name']}': " . $e->getMessage();
+                }
+            }
+            foreach ($preview['albums'] as $row) {
+                if ($row['lumora_id'] === null || $row['resolved_image_id'] === null) {
+                    $skipped++;
+                    continue;
+                }
+                if ($row['current_thumb_image_id'] > 0 && !$overwrite) {
+                    $skipped++;
+                    continue;
+                }
+                try {
+                    LumoraDB::update(
+                        'albums',
+                        ['thumb_image_id' => $row['resolved_image_id']],
+                        'id = ?',
+                        [$row['lumora_id']]
+                    );
+                    $updated++;
+                } catch (\Throwable $e) {
+                    $skipped++;
+                    $errors[] = "Album '{$row['title']}': " . $e->getMessage();
+                }
+            }
+            LumoraDB::commit();
+        } catch (\Throwable $e) {
+            LumoraDB::rollBack();
+            throw $e;
+        }
+
+        return ['updated' => $updated, 'skipped' => $skipped, 'errors' => $errors];
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /**
@@ -628,5 +736,337 @@ final class CoppermineImporter
             return date('Y-m-d H:i:s', (int) $value);
         }
         return (string) $value;
+    }
+
+    // ── Metadata sync helpers ────────────────────────────────────────────
+
+    /**
+     * Match CPG albums that have a custom thumbnail set (cpg_albums.thumb > 0)
+     * to their Lumora counterpart by folder, and resolve the thumbnail's
+     * picture ID to the corresponding Lumora image.
+     *
+     * @return list<array{cpg_aid: int, title: string, folder: string,
+     *     cpg_thumb_pid: int, lumora_id: int|null, current_thumb_image_id: int,
+     *     resolved_image_id: int|null, status: string}>
+     */
+    private function matchAlbumThumbnails(): array
+    {
+        $cpg_rows = $this->cpg->query(
+            "SELECT `aid`, `title`, `keyword`, `thumb`
+               FROM `{$this->cpg_prefix}albums`
+              WHERE `category` > 0"
+        )->fetchAll();
+
+        $folder_by_aid          = $this->fetchAllCpgAlbumFolders();
+        $lumora_album_by_folder = $this->fetchLumoraAlbumsByFolder();
+
+        $thumb_pids = [];
+        foreach ($cpg_rows as $r) {
+            $t = (int) ($r['thumb'] ?? 0);
+            if ($t > 0) $thumb_pids[] = $t;
+        }
+        $picture_info = $this->fetchCpgPictureInfo($thumb_pids);
+
+        $result = [];
+        foreach ($cpg_rows as $r) {
+            $cpg_aid = (int) $r['aid'];
+            $thumb   = (int) ($r['thumb'] ?? 0);
+            if ($thumb <= 0) {
+                continue; // no custom thumbnail set in Coppermine — nothing to sync
+            }
+
+            $title  = $this->decodeCpgText((string) ($r['title'] ?? ''));
+            $folder = $folder_by_aid[$cpg_aid]
+                ?? $this->resolveCpgAlbumFolder($cpg_aid, (string) ($r['keyword'] ?? ''));
+
+            $lumora    = $lumora_album_by_folder[$folder] ?? null;
+            $lumora_id = $lumora['id'] ?? null;
+            $current   = $lumora['thumb_image_id'] ?? 0;
+
+            $resolved = ($lumora_id !== null)
+                ? $this->resolvePidToLumoraImage($thumb, $picture_info, $folder_by_aid, $lumora_album_by_folder)
+                : null;
+
+            $status = match (true) {
+                $lumora_id === null => 'unmatched',
+                $resolved === null  => 'image_unresolved',
+                $current > 0        => 'already_set',
+                default             => 'ready',
+            };
+
+            $result[] = [
+                'cpg_aid'                => $cpg_aid,
+                'title'                  => $title,
+                'folder'                 => $folder,
+                'cpg_thumb_pid'          => $thumb,
+                'lumora_id'              => $lumora_id,
+                'current_thumb_image_id' => $current,
+                'resolved_image_id'      => $resolved,
+                'status'                 => $status,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Match CPG categories that have a custom thumbnail set
+     * (cpg_categories.thumb > 0) to their Lumora counterpart by full
+     * name-path from the root, and resolve the thumbnail's picture ID to
+     * the corresponding Lumora image.
+     *
+     * @return list<array{cpg_cid: int, name: string, cpg_thumb_pid: int,
+     *     lumora_id: int|null, current_thumb_image_id: int,
+     *     resolved_image_id: int|null, status: string}>
+     */
+    private function matchCategoryThumbnails(): array
+    {
+        $cpg_rows = $this->cpg->query(
+            "SELECT `cid`, `name`, `parent`, `thumb`
+               FROM `{$this->cpg_prefix}categories`
+              WHERE `parent` != -1"
+        )->fetchAll();
+
+        $cpg_by_id = [];
+        foreach ($cpg_rows as $r) {
+            $cpg_by_id[(int) $r['cid']] = [
+                'name'   => $this->decodeCpgText((string) $r['name']),
+                'parent' => (int) $r['parent'],
+                'thumb'  => (int) $r['thumb'],
+            ];
+        }
+
+        $cpg_paths = [];
+        foreach (array_keys($cpg_by_id) as $cid) {
+            $cpg_paths[$cid] = $this->buildCpgCategoryPath($cid, $cpg_by_id);
+        }
+
+        $lum_rows  = LumoraDB::fetchAll('SELECT `id`, `parent_id`, `name`, `thumb_image_id` FROM `{PREFIX}categories`');
+        $lum_by_id = [];
+        foreach ($lum_rows as $r) {
+            $lum_by_id[(int) $r['id']] = [
+                'parent_id'      => (int) $r['parent_id'],
+                'name'           => (string) $r['name'],
+                'thumb_image_id' => (int) $r['thumb_image_id'],
+            ];
+        }
+
+        $path_to_lumora_ids = [];
+        foreach (array_keys($lum_by_id) as $id) {
+            $path = $this->buildLumoraCategoryPath($id, $lum_by_id);
+            $path_to_lumora_ids[$path][] = $id;
+        }
+
+        $thumb_pids = [];
+        foreach ($cpg_by_id as $row) {
+            if ($row['thumb'] > 0) $thumb_pids[] = $row['thumb'];
+        }
+        $picture_info           = $this->fetchCpgPictureInfo($thumb_pids);
+        $folder_by_aid          = $this->fetchAllCpgAlbumFolders();
+        $lumora_album_by_folder = $this->fetchLumoraAlbumsByFolder();
+
+        $result = [];
+        foreach ($cpg_by_id as $cid => $row) {
+            if ($row['thumb'] <= 0) {
+                continue; // no custom thumbnail set in Coppermine — nothing to sync
+            }
+
+            $path      = $cpg_paths[$cid];
+            $matches   = $path_to_lumora_ids[$path] ?? [];
+            $lumora_id = (count($matches) === 1) ? $matches[0] : null;
+            $current   = $lumora_id !== null ? $lum_by_id[$lumora_id]['thumb_image_id'] : 0;
+
+            $resolved = ($lumora_id !== null)
+                ? $this->resolvePidToLumoraImage($row['thumb'], $picture_info, $folder_by_aid, $lumora_album_by_folder)
+                : null;
+
+            $status = match (true) {
+                count($matches) > 1 => 'ambiguous',
+                $lumora_id === null => 'unmatched',
+                $resolved === null  => 'image_unresolved',
+                $current > 0        => 'already_set',
+                default             => 'ready',
+            };
+
+            $result[] = [
+                'cpg_cid'                => $cid,
+                'name'                   => $row['name'],
+                'cpg_thumb_pid'          => $row['thumb'],
+                'lumora_id'              => $lumora_id,
+                'current_thumb_image_id' => $current,
+                'resolved_image_id'      => $resolved,
+                'status'                 => $status,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Build a normalised path string for a CPG category, walking the parent
+     * chain to the root. Uses ASCII 0x1F (unit separator) to join segments —
+     * a character that cannot appear in a CPG category name — so names
+     * containing slashes or other punctuation can never collide across
+     * genuinely different hierarchies.
+     *
+     * @param array<int, array{name: string, parent: int, thumb: int}> $cpg_by_id
+     */
+    private function buildCpgCategoryPath(int $cid, array $cpg_by_id): string
+    {
+        $parts = [];
+        $seen  = [];
+        while ($cid > 0 && isset($cpg_by_id[$cid]) && !isset($seen[$cid])) {
+            $seen[$cid] = true;
+            array_unshift($parts, trim($cpg_by_id[$cid]['name']));
+            $cid = $cpg_by_id[$cid]['parent'];
+        }
+        return implode("\x1f", $parts);
+    }
+
+    /**
+     * Lumora-side equivalent of buildCpgCategoryPath(), walking parent_id
+     * instead of the CPG `parent` column. Must build paths the same way so
+     * the two sides can be compared by exact string equality.
+     *
+     * @param array<int, array{parent_id: int, name: string, thumb_image_id: int}> $lum_by_id
+     */
+    private function buildLumoraCategoryPath(int $id, array $lum_by_id): string
+    {
+        $parts = [];
+        $seen  = [];
+        while ($id > 0 && isset($lum_by_id[$id]) && !isset($seen[$id])) {
+            $seen[$id] = true;
+            array_unshift($parts, trim($lum_by_id[$id]['name']));
+            $id = $lum_by_id[$id]['parent_id'];
+        }
+        return implode("\x1f", $parts);
+    }
+
+    /**
+     * Resolve a single CPG picture ID to its corresponding Lumora image ID,
+     * via the picture's (aid, filename) -> CPG album folder -> Lumora album
+     * -> filename match.
+     *
+     * @param array<int, array{aid: int, filename: string}> $picture_info
+     * @param array<int, string> $folder_by_aid
+     * @param array<string, array{id: int, thumb_image_id: int}> $lumora_album_by_folder
+     */
+    private function resolvePidToLumoraImage(
+        int   $pid,
+        array $picture_info,
+        array $folder_by_aid,
+        array $lumora_album_by_folder
+    ): ?int {
+        $info = $picture_info[$pid] ?? null;
+        if ($info === null) {
+            return null;
+        }
+
+        $folder = $folder_by_aid[$info['aid']] ?? null;
+        if ($folder === null) {
+            return null;
+        }
+
+        $lumora_album = $lumora_album_by_folder[$folder] ?? null;
+        if ($lumora_album === null) {
+            return null;
+        }
+
+        $id = LumoraDB::fetchValue(
+            'SELECT id FROM `{PREFIX}images` WHERE album_id = ? AND filename = ? LIMIT 1',
+            [$lumora_album['id'], $info['filename']]
+        );
+        return $id !== null ? (int) $id : null;
+    }
+
+    /**
+     * Batch-resolve a set of CPG picture IDs to their owning album ID and
+     * filename in one query.
+     *
+     * @param  list<int> $pids
+     * @return array<int, array{aid: int, filename: string}>
+     */
+    private function fetchCpgPictureInfo(array $pids): array
+    {
+        $pids = array_values(array_unique(array_filter($pids, static fn($p) => $p > 0)));
+        if (empty($pids)) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($pids), '?'));
+        $stmt = $this->cpg->prepare(
+            "SELECT `pid`, `aid`, `filename` FROM `{$this->cpg_prefix}pictures` WHERE `pid` IN ({$placeholders})"
+        );
+        $stmt->execute($pids);
+
+        $result = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $result[(int) $row['pid']] = [
+                'aid'      => (int) $row['aid'],
+                'filename' => basename((string) $row['filename']),
+            ];
+        }
+        return $result;
+    }
+
+    /**
+     * Resolve every CPG album's on-disk folder, covering the entire
+     * installation. Unlike fetchCpgAlbumFilepaths(), this is not limited to
+     * a keyset-paginated chunk of album IDs — the metadata sync tool needs
+     * the full picture in one pass since categories/albums are processed as
+     * a whole, not in chunks.
+     *
+     * @return array<int, string> CPG aid => folder
+     */
+    private function fetchAllCpgAlbumFolders(): array
+    {
+        // Primary: actual on-disk path recorded against each album's pictures.
+        $folder_by_aid = [];
+        try {
+            $stmt = $this->cpg->query(
+                "SELECT `aid`, MIN(`filepath`) AS `filepath` FROM `{$this->cpg_prefix}pictures` GROUP BY `aid`"
+            );
+            foreach ($stmt->fetchAll() as $row) {
+                $fp = trim((string) ($row['filepath'] ?? ''), " \t\n\r/\\");
+                $fp = (string) preg_replace('#^albums/#i', '', $fp);
+                $fp = trim($fp, '/');
+                if ($fp !== '') {
+                    $folder_by_aid[(int) $row['aid']] = $fp;
+                }
+            }
+        } catch (\Throwable) {
+            // filepath column absent on some CPG variants — every album falls
+            // through to the keyword-based fallback below.
+        }
+
+        // Fallback: albums with no pictures yet (or filepath unavailable) —
+        // derive from the keyword column the same way resolveCpgAlbumFolder() does.
+        $stmt = $this->cpg->query(
+            "SELECT `aid`, `keyword` FROM `{$this->cpg_prefix}albums` WHERE `category` > 0"
+        );
+        foreach ($stmt->fetchAll() as $row) {
+            $aid = (int) $row['aid'];
+            if (!isset($folder_by_aid[$aid])) {
+                $folder_by_aid[$aid] = $this->resolveCpgAlbumFolder($aid, (string) ($row['keyword'] ?? ''));
+            }
+        }
+
+        return $folder_by_aid;
+    }
+
+    /**
+     * @return array<string, array{id: int, thumb_image_id: int}> Lumora folder => album row
+     */
+    private function fetchLumoraAlbumsByFolder(): array
+    {
+        $rows = LumoraDB::fetchAll('SELECT `id`, `folder`, `thumb_image_id` FROM `{PREFIX}albums`');
+        $result = [];
+        foreach ($rows as $row) {
+            $result[(string) $row['folder']] = [
+                'id'             => (int) $row['id'],
+                'thumb_image_id' => (int) $row['thumb_image_id'],
+            ];
+        }
+        return $result;
     }
 }

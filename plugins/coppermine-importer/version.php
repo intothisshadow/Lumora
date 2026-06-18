@@ -12,13 +12,22 @@ declare(strict_types=1);
  */
 
 /** Importer plugin version. Update only when releasing a new plugin version. */
-define('LUMORA_CPG_IMPORTER_VERSION',     '1.0.0');
+define('LUMORA_CPG_IMPORTER_VERSION',     '1.0.1');
 
 /** Minimum Lumora Gallery version required to run this plugin. */
 define('LUMORA_CPG_IMPORTER_MIN_LUMORA',  '1.5.0');
 
 /** Source identifier used in migration_status and migration_log tables. */
 define('LUMORA_CPG_IMPORTER_SOURCE',      'coppermine');
+
+/**
+ * Source identifier used for migration_log entries written by the standalone
+ * metadata sync tool (admin/sync_metadata.php). Deliberately distinct from
+ * LUMORA_CPG_IMPORTER_SOURCE so its log entries never mix with — or get
+ * summarised into — the main import's migration_status row, since the sync
+ * tool is not a full import and does not call saveMigrationStatus().
+ */
+define('LUMORA_CPG_IMPORTER_SYNC_SOURCE', 'coppermine_thumb_sync');
 
 /** Number of categories processed per AJAX chunk. */
 define('LUMORA_CPG_IMPORTER_CAT_CHUNK',  100);

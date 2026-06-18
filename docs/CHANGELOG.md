@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 
-## [Unreleased]
+## [1.7.1] — 2026-06-19
 
 ### Added
 
@@ -192,6 +192,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   
   
   
+- **Coppermine Importer — Metadata Sync tool** (`plugins/coppermine-importer/CoppermineImporter.php`,
+  `plugins/coppermine-importer/admin/sync_metadata.php`,
+  `plugins/coppermine-importer/admin/index.php`,
+  `plugins/coppermine-importer/version.php`,
+  `plugins/coppermine-importer/README.md`):
+  Standalone companion to the main import wizard that syncs category and album
+  cover-thumbnail selections from an existing Coppermine installation into an
+  already-imported Lumora gallery, without requiring a full re-import.
+
+  The main wizard does not carry over cover selections because it processes records
+  in small keyset-paginated chunks and does not persist the CPG-ID → Lumora-ID
+  map between requests. The sync tool re-derives matches from durable on-disk
+  identifiers: albums by folder path (from `cpg_pictures.filepath`, falling back
+  to `cpg_albums.keyword`), categories by full name-path from root using ASCII
+  0x1F as a separator so names containing slashes cannot collide.
+
+  - **`CoppermineImporter::previewThumbnailSync(): array`** — read-only method;
+    returns a `{categories: [...], albums: [...]}` structure with per-record status
+    strings (`ready`, `already_set`, `unmatched`, `image_unresolved`, `ambiguous`).
+
+  - **`CoppermineImporter::applyThumbnailSync(bool $overwrite): array`** —
+    re-runs the same matching logic fresh (no client state trusted), applies writes
+    inside a single `LumoraDB` transaction with rollback on any `\Throwable`, and
+    returns `{updated, skipped, errors}`.
+
+  - **Private helpers added to `CoppermineImporter`:** `matchAlbumThumbnails()`,
+    `matchCategoryThumbnails()`, `buildCpgCategoryPath()`,
+    `buildLumoraCategoryPath()`, `resolvePidToLumoraImage()`,
+    `fetchCpgPictureInfo()`, `fetchAllCpgAlbumFolders()`,
+    `fetchLumoraAlbumsByFolder()`.
+
+  - **`admin/sync_metadata.php`** — new three-step admin page (Credentials →
+    Preview → Report). Separate session key (`lumora_cpg_thumb_sync`) prevents
+    collision with the main wizard. Preview step shows a tally table and a
+    scrollable per-record detail table with status badges. Apply step requires a
+    backup-confirmation checkbox; writes a timestamped audit log to
+    `plugins/coppermine-importer/logs/`. Report step shows matched/updated/skipped
+    counts, errors (first 20 listed), and the log file path.
+
+  - **`admin/index.php` (wizard)** — two contextual links to `sync_metadata.php`
+    added: a blue info notice on the credentials page (shown only after a previous
+    import), and a small-text paragraph on the results page.
+
+  - **`version.php`** — new constant `LUMORA_CPG_IMPORTER_SYNC_SOURCE`
+    (`'coppermine_thumb_sync'`): the source key used in `migration_log` for sync
+    runs, kept separate from `LUMORA_CPG_IMPORTER_SOURCE` so sync events never
+    mix with or overwrite the main import's `migration_status` row.
+
+  - **`README.md`** — new § *Metadata Sync tool* section documenting the sync
+    scope table, matching strategy, preview status values, and safety guarantees.
+
 ### Fixed
 
 - **Albums and thumbnails missing their added/updated date — regression from a prior fix lost on a file overwrite** (`include/services/ThemeRenderer.php`, `themes/default/lumora.css`, `themes/classic-fansite/fansite.css`):

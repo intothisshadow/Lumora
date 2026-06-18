@@ -4,6 +4,31 @@ Long-term archive of completed work, migrated from TODO.md on release.
 
 ---
 
+## v1.7.1 — Released 2026-06-19
+
+### Bug Fixes
+
+- [x] Albums missing added/updated date in album info display — regression from a prior fix lost on file overwrite; re-implemented in `ThemeRenderer::renderCatgrid()` and both core theme stylesheets (`.lum-card-date`).
+- [x] Thumbnails missing added/updated date in thumbnail info display — regression from a prior fix lost on file overwrite; re-implemented in `ThemeRenderer::renderThumbgrid()` and both core theme stylesheets (`.lum-thumb-date`).
+- [x] Album cards showed the Lumora import date (`created_at`) as the "Updated" date instead of when content was actually last added; `GalleryService::getAlbums()` now selects `MAX(images.added_at)` as `latest_added_at`; `ThemeRenderer::renderCatgrid()` prefers this field over `created_at` and relabels the span from "Added" to "Updated".
+- [x] Sort bar overflowed past the viewport edge on narrow phones — fixed with `flex-wrap: wrap` in the `@media (max-width: 575px)` block of both core theme stylesheets (`default/lumora.css`, `classic-fansite/fansite.css`).
+- [x] Category list header labels overflowed past the viewport edge on narrow phones — fixed by shrinking header cell font-size and padding to match the data cells at the same breakpoint in both core themes.
+- [x] Corrected the official Lumora Gallery website URL in `ThemeRenderer.php`.
+
+### Added
+
+- [x] **Admin Password Recovery** (`admin/forgot_password.php`, `admin/reset_password.php`, `include/auth.php`, `admin/login.php`): Admins who have lost their password can generate a secure reset link without SMTP. Link is written to `lumora_recovery.txt` in the gallery root; best-effort `mail()` send is also attempted when an email is configured. Same split-token scheme as Remember Me. New DB table `{PREFIX}password_reset_tokens`; `LUMORA_DB_VERSION` bumped to 7.
+- [x] **Regenerate Missing Thumbnails** (`admin/tools.php`, `admin/ajax_missing_thumbs.php`): Tool 4 on Admin → Tools. Scans all images in scope (entire gallery or a selected album) and regenerates thumbnails only where the thumbnail file is missing or empty, skipping images with valid thumbnails. Keyset-paginated AJAX handler. JSON response: `{ checked, regenerated, skipped, no_orig, last_id, errors[], done }`.
+- [x] **Admin Image Search** (`admin/images.php`, `include/services/GalleryService.php`, `install/schema.sql`): Administrators can search images by filename or title from Admin → Images, scoped to a selected album or across all albums. Cross-album results include the category › album path. `GalleryService::searchImages()` and `GalleryService::countSearchImages()` added. Pagination, bulk delete, bulk move, and single-image actions all preserve the active search term. Optional B-tree prefix indexes for `filename(191)` and `title(191)` documented.
+- [x] **Theme Metadata from CSS Headers** (`include/functions.php`, `admin/config.php`, `themes/default/lumora.css`, `themes/classic-fansite/fansite.css`): Theme display names, author, and design URI can be declared in a WordPress-style CSS header comment at the top of the primary stylesheet. `lumora_theme_primary_stylesheet()` and `lumora_get_theme_meta()` added to `include/functions.php`. Admin → Configuration → Appearance shows `Theme Name` in the Active Theme dropdown and a reference table for all installed themes. Both core themes updated with standardised metadata headers.
+- [x] **Coppermine Importer — Metadata Sync tool** (`plugins/coppermine-importer/admin/sync_metadata.php`, `plugins/coppermine-importer/CoppermineImporter.php`, `plugins/coppermine-importer/admin/index.php`, `plugins/coppermine-importer/version.php`, `plugins/coppermine-importer/README.md`): Standalone companion to the main import wizard. Syncs category and album cover-thumbnail selections from an existing Coppermine database to an already-imported Lumora gallery, without a full re-import. Albums matched by folder path; categories matched by full name-path from root. Three-step page: Credentials → Preview → Report. Preview mode shows per-record status badges; apply step runs inside a single transaction with rollback on failure and writes a timestamped audit log to `plugins/coppermine-importer/logs/`.
+
+### Changed
+
+- [x] Album and category card metadata restructured from a single inline string into individually styled rows (`ThemeRenderer::renderCatgrid()`, `.lum-card-meta`, `.lum-card-images`, `.lum-card-views`, `.lum-card-subcats`, `.lum-card-albums`). All core themes updated with matching CSS.
+
+---
+
 ## v1.7.0 — Released 2026-06-16
 
 ### Update Checker (Phase 1)

@@ -47,6 +47,7 @@ Lumora/
 │   ├── ajax_image_delete.php    AJAX endpoint for bulk image deletion
 │   ├── ajax_image_move.php      AJAX endpoint for bulk image move between albums
 │   ├── ajax_image_rethumb.php   AJAX endpoint for single-image thumbnail regeneration
+│   ├── ajax_missing_thumbs.php  AJAX endpoint for missing-thumbnail regeneration (Tool 4)
 │   ├── ajax_integrity.php      AJAX endpoint for integrity scan chunks
 │   ├── ajax_integrity_delete.php  AJAX endpoint for deleting orphaned records
 │   ├── ajax_dimensions.php     AJAX endpoint for reload-dimensions chunks
@@ -57,7 +58,7 @@ Lumora/
 │   ├── dashboard.php           Stats overview
 │   ├── images.php              Image management (edit, delete, move, bulk actions)
 │   ├── migrate.php             Migration hub — discovers and launches importer plugins
-│   ├── tools.php               Admin tools (File Integrity Check, Reload Dimensions, Regenerate Thumbnails)
+│   ├── tools.php               Admin tools (File Integrity Check, Reload Dimensions, Regenerate Thumbnails, Regenerate Missing Thumbnails)
 │   ├── update.php              Update checker — version status and manual check
 │   ├── forgot_password.php  Password recovery — generates a reset link to lumora_recovery.txt
 │   ├── reset_password.php   Password reset — validates token, sets new password
@@ -146,14 +147,15 @@ migration straightforward — point Lumora at the same `albums/` directory and r
 - **Dashboard** — stats cards + latest images
 - **Categories** — create, edit, delete; nested (parent/child); re-parents children on delete; optional cover image (ID-based, falls back to first image in category's albums)
 - **Albums** — create, edit, delete; auto-generated folder names or custom; filesystem directory creation; empty folder removed automatically on album delete
-- **Images** — per-album paginated image grid (24/page); edit title, sort position, and visibility; optional file replacement via multipart upload (validates type, size, image integrity; regenerates thumbnail and updates dimensions/filesize); single-image delete cleans up disk files and resets album/category cover references; bulk delete and bulk move to another album (up to 500 images per AJAX call); per-image thumbnail regeneration
+- **Images** — per-album paginated image grid (24/page); search images by filename or title (scoped to an album or across all albums; cross-album results include the category › album path); edit title, sort position, and visibility; optional file replacement via multipart upload (validates type, size, image integrity; regenerates thumbnail and updates dimensions/filesize); single-image delete cleans up disk files and resets album/category cover references; bulk delete and bulk move to another album (up to 500 images per AJAX call); per-image thumbnail regeneration
 - **Batch Add** — scan `albums/{folder}/` for new images, process in 50-image AJAX chunks (handles 9000+ without timeout)
 - **Configuration** — all settings in one form; theme selector; live image processor status; gallery behavior and upload limit controls
 - **Config export/import** — JSON backup; import excludes `base_url` to protect other installs
-- **Tools** — three maintenance operations, each scoped to all albums or a single album:
+- **Tools** — four maintenance operations, each scoped to all albums or a single album:
   - **File Integrity Check** — verifies both the original file and thumbnail exist on disk for every image record; runs in 500-image AJAX chunks (handles 500 000+ images); missing files listed in a results table with checkboxes; bulk-delete orphaned DB records in one click (disk files are never touched)
   - **Reload Dimensions** — re-reads pixel dimensions and file sizes from disk and updates the database; runs in 100-image AJAX chunks; useful after manual file operations or migrations
   - **Regenerate Thumbnails** — regenerates thumbnails via `lumora_generate_thumb()` for every image; runs in 20-image AJAX chunks; respects Imagick/GD availability
+  - **Regenerate Missing Thumbnails** — regenerates thumbnails only for images where the thumbnail file is missing or empty, leaving existing valid thumbnails untouched; runs in 500-image AJAX chunks; significantly faster than a full regeneration when only a small fraction of thumbnails are absent (e.g. after manual file additions or a partial batch-add failure)
 - **Account** — update username and email address; change password with current-password verification; **Forgot password** link on the login page generates a secure reset link written to `lumora_recovery.txt` in the gallery root (1-hour single-use token, email attempted if address is set)
 
 ### Themes

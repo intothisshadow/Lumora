@@ -3,7 +3,7 @@
 An official Lumora Gallery plugin that migrates categories, albums, and image
 metadata from Coppermine Gallery (CPG 1.4–1.6) to Lumora.
 
-**Plugin version:** 1.0.0  
+**Plugin version:** 1.0.1  
 **Requires Lumora:** 1.5.0+  
 **License:** GPL-3.0-or-later
 
@@ -109,7 +109,7 @@ Images:      8,432
 The single source of truth for the plugin version is `version.php`:
 
 ```php
-define('LUMORA_CPG_IMPORTER_VERSION', '1.0.0');
+define('LUMORA_CPG_IMPORTER_VERSION', '1.0.1');
 ```
 
 This constant is used throughout the codebase for:
@@ -155,6 +155,62 @@ CREATE TABLE IF NOT EXISTS `lum_migration_log` (
 ```
 
 Replace `lum_` with your actual table prefix.
+
+---
+
+## Metadata Sync tool
+
+The plugin ships a second admin page at `admin/sync_metadata.php` — the
+**Metadata Sync tool** — which syncs category and album cover-thumbnail
+selections from Coppermine into an *already-imported* Lumora gallery.
+
+Access it at:
+`Admin → Import → Coppermine Importer → Metadata Sync` (linked from the
+importer wizard's credentials page and results page), or navigate directly to
+`plugins/coppermine-importer/admin/sync_metadata.php`.
+
+### What it syncs
+
+| Data                             | Synced | Notes                                    |
+|----------------------------------|--------|------------------------------------------|
+| Category cover-thumbnail         | ✅     | From `cpg_categories.thumb`              |
+| Album cover-thumbnail            | ✅     | From `cpg_albums.thumb`                  |
+| Categories, albums, image records| ❌     | Use the main importer for those          |
+
+The main import wizard does not carry over cover selections because it processes
+records in small chunks and does not persist the CPG-ID → Lumora-ID map between
+chunks. The sync tool re-derives matches from durable on-disk identifiers:
+
+- **Albums** — matched by `folder` (resolved from `cpg_pictures.filepath`,
+  falling back to `cpg_albums.keyword`).
+- **Categories** — matched by full name-path from root using ASCII 0x1F as the
+  separator so names with slashes cannot collide across different hierarchies.
+
+### Status values in the preview table
+
+| Status          | Meaning                                                              |
+|-----------------|----------------------------------------------------------------------|
+| Ready           | Will be set on Apply                                                 |
+| Has cover       | Already set in Lumora; only changes if Overwrite is checked          |
+| Unmatched       | No Lumora counterpart found by folder / name-path                    |
+| Image not found | Matched, but the cover image is not in Lumora's `images` table       |
+| Ambiguous       | Category name-path matched more than one Lumora category             |
+
+### Safety
+
+- All writes are wrapped in a single Lumora-side transaction; a PHP exception
+  anywhere rolls back every change for that run.
+- The tool defaults to filling only records where `thumb_image_id = 0`.
+  Check **Overwrite** to replace existing cover selections.
+- A required **backup confirmation** checkbox must be ticked before Apply.
+- A timestamped plain-text log is written to
+  `plugins/coppermine-importer/logs/thumb_sync_YYYYMMDD_HHMMSS.log`.
+  Restrict web access to that directory or delete old logs periodically.
+- The tool never calls `saveMigrationStatus()`, so sync runs never overwrite
+  the import record in `migration_status`. Log entries are written under the
+  source key `coppermine_thumb_sync` (constant `LUMORA_CPG_IMPORTER_SYNC_SOURCE`)
+  to keep them separate from the main import's log.
+- The tool is safe to re-run any number of times.
 
 ---
 

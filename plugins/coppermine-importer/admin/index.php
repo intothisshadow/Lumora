@@ -161,6 +161,15 @@ if ($step === 1) {
     }
 
     echo $reimport_html;
+
+    if ($status !== null) {
+        echo '<div class="alert alert-info small mb-3" style="max-width:600px;">'
+            . 'Only here to fill in missing cover thumbnails on a gallery you already imported? '
+            . 'Use the <a href="' . h($plugin_url . 'sync_metadata.php') . '">Metadata Sync tool</a> instead '
+            . '&mdash; it does not touch categories, albums, or images.'
+            . '</div>';
+    }
+
     echo '<div class="card" style="max-width:600px;">';
     echo '<div class="card-header">Coppermine Database Credentials</div>';
     echo '<div class="card-body">';
@@ -503,6 +512,9 @@ JSEOF;
         . '</table>';
     echo '<p class="small text-muted">Run <strong>Tools &rarr; File Integrity Check</strong> '
         . 'to verify all image files are present in the correct locations.</p>';
+    echo '<p class="small text-muted">Categories or albums missing a cover image? Use the '
+        . '<a href="' . h($plugin_url . 'sync_metadata.php') . '">Metadata Sync tool</a> '
+        . 'to fill in cover thumbnail selections from Coppermine.</p>';
     echo $warn_html;
     echo '<div class="d-flex gap-2 mt-3">'
         . '<a href="' . h($admin_url . 'tools.php')  . '" class="btn btn-outline-primary btn-sm">Go to Tools</a>'
