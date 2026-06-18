@@ -40,6 +40,7 @@ Copy `config.sample.php` to `config.php` and fill in your database details, then
 Lumora/
 ├── admin/                      Admin panel
 │   ├── includes/               Admin-only helpers (flash messages, page renderer)
+│   ├── index.php               Admin entry point — redirects unauthenticated requests to login
 │   ├── account.php             Account management (username, email, password)
 │   ├── albums.php              Album management
 │   ├── batch.php               Batch-add images from FTP
@@ -71,7 +72,9 @@ Lumora/
 │   │   ├── LumoraConfig.php    Config cache — load(), get(), set()
 │   │   ├── GalleryService.php  Category, album, image, stats, visitor-tracking queries
 │   │   ├── ThumbnailService.php Thumbnail generation, resizing, metadata, batch-add
-│   │   └── ThemeRenderer.php   All HTML output: pages, grids, breadcrumbs, lightbox
+│   │   ├── ThemeRenderer.php   All HTML output: pages, grids, breadcrumbs, lightbox
+│   │   ├── MigrationService.php Import status tracking, plugin discovery, event logging
+│   │   └── UpdateService.php   Remote update check, version comparison, 24-hour cache
 │   ├── bootstrap.php           Load order, constants
 │   ├── db.php                  PDO singleton (LumoraDB)
 │   ├── functions.php           Utility helpers and legacy forwarding wrappers
@@ -81,6 +84,16 @@ Lumora/
 ├── install/                    Web-based installer (delete after use)
 │   ├── index.php
 │   └── schema.sql
+├── plugins/                    Optional plugins
+│   └── coppermine-importer/    Official Coppermine → Lumora migration plugin
+│       ├── CoppermineImporter.php  Core importer class (categories, albums, images, cover sync)
+│       ├── plugin.json         Plugin manifest (consumed by admin/migrate.php)
+│       ├── version.php         Single source of truth for plugin version
+│       ├── README.md           Plugin documentation and Metadata Sync tool reference
+│       └── admin/              Plugin admin pages
+│           ├── index.php       Four-step import wizard
+│           ├── ajax_import.php AJAX chunk processor for import steps
+│           └── sync_metadata.php Post-import cover-thumbnail sync tool
 ├── themes/                     Theme folders
 │   ├── default/
 │   │   ├── template.html       Bootstrap 5 base template
@@ -88,6 +101,7 @@ Lumora/
 │   └── classic-fansite/
 │       ├── template.html       Classic fansite layout (banner, sticky nav, centred panel)
 │       ├── fansite.css         Fully variable-driven styles with fandom colour presets
+│       ├── custom.css          Optional per-site CSS overrides (loaded after fansite.css)
 │       └── README.md           Customisation guide + theme creation walkthrough
 ├── ajax_hit.php                Public image view counter endpoint (fire-and-forget POST)
 ├── album.php                   Public album view (pagination, sort, lightbox)
@@ -230,7 +244,7 @@ migration is a scan-and-index operation — no file conversion needed:
    (e.g. `Xena/Season1/1x01-SinsOfThePast`).
 3. Run **Batch Add** on each album — Lumora indexes the images without touching the files.
 
-A dedicated Coppermine → Lumora import tool (auto-creates categories, albums, and runs Batch Add in one pass) is planned for a future release.
+The **Coppermine Importer** plugin (`plugins/coppermine-importer/`) automates this entirely — it connects to the Coppermine database directly and imports categories, albums, and image metadata in keyset-paginated AJAX chunks without touching any files. Navigate to **Admin → Import** to run it. After import, use the plugin's **Metadata Sync** tool to carry over category and album cover-thumbnail selections.
 
 ---
 
