@@ -27,6 +27,21 @@ function ins_h(mixed $v): string
     return htmlspecialchars((string) $v, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 }
 
+/**
+ * Generate a unique, random table prefix in the format lum_XXXXXXXX_ where
+ * XXXXXXXX is 8 lowercase hexadecimal characters derived from random bytes.
+ *
+ * Example: lum_3f9a12b4_
+ *
+ * The prefix contains only letters, digits, and underscores, satisfying
+ * MariaDB/MySQL identifier rules. The fixed lum_ lead ensures the prefix is
+ * immediately recognisable as a Lumora installation in a shared database.
+ */
+function ins_generate_prefix(): string
+{
+    return 'lum_' . substr(bin2hex(random_bytes(5)), 0, 8) . '_';
+}
+
 function ins_page(string $title, string $body, int $step = 1): never
 {
     $ver = LUMORA_VERSION;
@@ -305,6 +320,14 @@ if (empty($_SESSION['ins_csrf'])) {
 }
 $csrf = $_SESSION['ins_csrf'];
 
+// ── Generate a suggested table prefix once per install session ────────────────
+// Persisting in the session means the same prefix is shown across page refreshes
+// and failed submissions, so the user always sees a stable value to review.
+// A forced reinstall (?force=1) resets it so a fresh prefix is generated.
+if (isset($_GET['force']) || empty($_SESSION['ins_suggested_prefix'])) {
+    $_SESSION['ins_suggested_prefix'] = ins_generate_prefix();
+}
+
 // ── Step 1 POST: Validate DB, run schema, show admin form ─────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === '1') {
 
@@ -325,7 +348,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === '1') {
     $db_name   = trim($_POST['db_name']   ?? '');
     $db_user   = trim($_POST['db_user']   ?? '');
     $db_pass   = $_POST['db_pass']        ?? '';
-    $db_prefix = preg_replace('/[^a-zA-Z0-9_]/', '', trim($_POST['db_prefix'] ?? 'lum_'));
+    $db_prefix = preg_replace('/[^a-zA-Z0-9_]/', '', trim($_POST['db_prefix'] ?? $_SESSION['ins_suggested_prefix']));
 
     if ($db_name === '' || $db_user === '' || $db_prefix === '') {
         $_SESSION['ins_errors'] = ['Database name, user, and table prefix are required.'];
@@ -365,9 +388,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === '1') {
 
     $_SESSION['ins_base_url'] = $base_url;
 
-    $b_url = ins_h($base_url);
+    // Escape values for heredoc interpolation.
+    $b_url       = ins_h($base_url);
+    $db_name_h   = ins_h($db_name);
+    $db_prefix_h = ins_h($db_prefix);
+
     $body = <<<HTML
-<div class="alert alert-success py-2 mb-4">Database connected and tables created successfully.</div>
+<div class="alert alert-success py-2 mb-4">&#10003; Database connected and tables created successfully.</div>
+<div class="card mb-4 border-success">
+  <div class="card-header bg-success bg-opacity-10 py-2 small fw-semibold" style="color:#146c43">
+    &#10003; Database Configuration Confirmed
+  </div>
+  <div class="card-body py-2 px-3">
+    <div class="row g-1 small">
+      <div class="col-5 text-muted">Database</div>
+      <div class="col-7 fw-semibold">{$db_name_h}</div>
+      <div class="col-5 text-muted">Table Prefix</div>
+      <div class="col-7"><code class="text-primary">{$db_prefix_h}</code></div>
+    </div>
+    <div class="mt-2 small text-muted">
+      All Lumora tables have been created with the prefix above.
+      Record this value — you will need it if you ever reconfigure manually.
+    </div>
+  </div>
+</div>
 <h5 class="mb-3">Gallery Settings</h5>
 <form method="post" action="">
   <input type="hidden" name="step"       value="2">
@@ -438,11 +482,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === '2') {
         foreach ($errors as $e) {
             $err_html .= '<div class="alert alert-danger py-2">' . ins_h($e) . '</div>';
         }
-        $b_url   = ins_h($base_url);
-        $g_name  = ins_h($gallery_name);
-        $a_user  = ins_h($admin_user);
-        $a_email = ins_h($admin_email);
+        $b_url       = ins_h($base_url);
+        $g_name      = ins_h($gallery_name);
+        $a_user      = ins_h($admin_user);
+        $a_email     = ins_h($admin_email);
+        $db_name_h   = ins_h((string) ($db['db_name']   ?? ''));
+        $db_prefix_h = ins_h((string) ($db['db_prefix'] ?? ''));
         $body = $err_html . <<<HTML
+<div class="card mb-4 border-success">
+  <div class="card-header bg-success bg-opacity-10 py-2 small fw-semibold" style="color:#146c43">
+    &#10003; Database Configuration Confirmed
+  </div>
+  <div class="card-body py-2 px-3">
+    <div class="row g-1 small">
+      <div class="col-5 text-muted">Database</div>
+      <div class="col-7 fw-semibold">{$db_name_h}</div>
+      <div class="col-5 text-muted">Table Prefix</div>
+      <div class="col-7"><code class="text-primary">{$db_prefix_h}</code></div>
+    </div>
+  </div>
+</div>
 <h5 class="mb-3">Gallery Settings</h5>
 <form method="post" action="">
   <input type="hidden" name="step"       value="2">
@@ -602,7 +661,7 @@ HTML;
     }
 
     // Clean up installer session data.
-    unset($_SESSION['ins_db'], $_SESSION['ins_base_url'], $_SESSION['ins_csrf']);
+    unset($_SESSION['ins_db'], $_SESSION['ins_base_url'], $_SESSION['ins_csrf'], $_SESSION['ins_suggested_prefix']);
 
     // Attempt to auto-delete the installer directory.
     // On most Unix/Linux hosts this succeeds; on Windows or with restrictive
@@ -673,8 +732,11 @@ $p_fix    = $can_go
 $v_host   = ins_h((string) ($old['db_host']   ?? 'localhost'));
 $v_name   = ins_h((string) ($old['db_name']   ?? ''));
 $v_user   = ins_h((string) ($old['db_user']   ?? ''));
-$v_prefix = ins_h((string) ($old['db_prefix'] ?? 'lum_'));
 $v_port   = ins_h((string) ($old['db_port']   ?? '3306'));
+
+// Use the last submitted prefix when re-rendering after an error; otherwise
+// use the session-generated prefix so the field is pre-filled on first load.
+$v_prefix = ins_h((string) ($old['db_prefix'] ?? $_SESSION['ins_suggested_prefix']));
 
 $body = <<<HTML
 <h5 class="mb-3">System Requirements</h5>
@@ -707,9 +769,17 @@ $body = <<<HTML
     <input type="password" name="db_pass" value="" class="form-control">
   </div>
   <div class="mb-4">
-    <label class="form-label fw-semibold">Table Prefix <small class="text-muted">(default: lum_)</small></label>
-    <input type="text" name="db_prefix" value="{$v_prefix}" class="form-control" required pattern="[a-zA-Z0-9_]+">
-    <div class="form-text">Only letters, numbers, and underscores.</div>
+    <label class="form-label fw-semibold">
+      Table Prefix
+      <span class="badge bg-primary ms-1" style="font-size:.7rem;vertical-align:middle">auto-generated</span>
+    </label>
+    <input type="text" name="db_prefix" value="{$v_prefix}" class="form-control font-monospace" required
+           pattern="[a-zA-Z0-9_]+" title="Only letters, numbers, and underscores">
+    <div class="form-text">
+      A unique prefix has been generated for this installation, making your table names harder
+      to guess in a shared database. Advanced users may change it — only letters, digits, and
+      underscores are allowed.
+    </div>
   </div>
   <button type="submit" class="btn btn-primary"{$disabled}>Next: Set Up Database →</button>
   {$p_fix}

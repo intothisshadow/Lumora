@@ -8,6 +8,231 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 
+## [1.8.0] — 2026-06-20
+
+### Added
+
+- **Coppermine Importer — In-wizard cover image assignment** (`plugins/coppermine-importer/CoppermineImporter.php`,
+  `plugins/coppermine-importer/admin/ajax_import.php`,
+  `plugins/coppermine-importer/admin/index.php`,
+  `plugins/coppermine-importer/version.php`,
+  `plugins/coppermine-importer/plugin.json`,
+  `plugins/coppermine-importer/README.md`):
+  Album and category cover images (`cpg_albums.thumb`, `cpg_categories.thumb`) are
+  now preserved automatically as part of the main import wizard, completing TODO
+  item 5. Cover assignment runs as a dedicated **Cover images** step at the end of
+  the wizard — after all images have been imported and both CPG→Lumora ID maps are
+  fully populated in session — then the wizard proceeds to the existing Finish step.
+
+  **How it works:**
+  - The wizard JS gains a `'covers'` phase between `'images'` and `'finish'`. A
+    single `apply_covers` AJAX call is made; it is non-chunked and non-critical:
+    a network error or server failure logs a warning in the import log and sets
+    `cov-status` to *skipped* without blocking Finish or the results page.
+  - `CoppermineImporter::importCovers(array $cat_id_map, array $album_id_map): array`
+    — new public method. Reads every CPG album and category with `thumb > 0`,
+    batch-fetches `(aid, filename)` for all referenced picture IDs via the existing
+    `fetchCpgPictureInfo()` helper, then resolves each to a Lumora image_id via:
+    `pid → (aid, filename) → album_id_map[aid] → (Lumora album_id, filename) → Lumora
+    image_id`. All writes are wrapped in a single `LumoraDB` transaction; individual
+    row failures are caught per-row so one bad reference never aborts the batch.
+    Missing covers fall through silently to Lumora’s automatic cover selection
+    (`thumb_image_id = 0`). Returns `{updated, skipped, warnings}`.
+  - `case 'apply_covers':` added to `ajax_import.php`. Calls `importCovers()` with
+    the full ID maps from session; logs all warnings and a summary event via
+    `MigrationService::logEvent()`; catches any `\Throwable` and returns a graceful
+    JSON response so the wizard can always proceed to Finish.
+  - Step 3 progress UI gains a **Cover images** status row (no progress bar—single
+    call). When complete it shows e.g. *42 assigned ✓*; on error it shows *skipped*
+    with a log entry.
+  - The `'images'` phase JS is updated: when images are done (`r.done = true`) it
+    now transitions to `phase = 'covers'` instead of directly to `phase = 'finish'`.
+    The stopped-import logic is updated so the Stop button still halts the import
+    mid-images (`stopped && !r.done`), but once all images are complete cover
+    assignment always runs regardless of the stopped flag (it is a single fast call).
+  - Plugin bumped to **v1.1.0** (`version.php`, `plugin.json`).
+  - **Relationship to Metadata Sync tool:** The in-wizard `importCovers()` uses the
+    exact CPG→Lumora ID maps built in the current session, which is more reliable
+    than the folder/name-path matching the standalone Metadata Sync tool uses. The
+    sync tool remains the recommended fallback for re-running cover assignment after
+    a stopped import or for galleries imported before v1.1.0.
+
+- **Admin UI Pagination — Albums and Categories** (`admin/albums.php`,
+  `admin/categories.php`, `admin/includes/admin_helpers.php`,
+  `include/services/GalleryService.php`):
+  Both the Albums and Categories admin list pages now paginate at the database
+  level so only the current page's rows are fetched, keeping large galleries
+  responsive regardless of how many albums or categories exist.
+
+  - **Page size selector** — three options (25 / 50 / 100 items per page),
+    rendered as an auto-submitting `<select>` above the table. The selected
+    value is persisted in `$_SESSION['lum_adm_per_page_albums']` and
+    `$_SESSION['lum_adm_per_page_categories']` so it survives page navigation.
+    Defaults to 25 on first visit.
+
+  - **Item count summary** — "Showing 26–50 of 847 albums" displayed to the
+    left of the per-page selector on every list page.
+
+  - **Pagination controls** — Bootstrap 5 `<nav>` rendered above and below the
+    table. Shows Previous / page-number window (±2 around the current page plus
+    first and last) / Next. Ellipsis indicators are inserted for gaps.
+    Pages with only one page of results show no pagination controls.
+
+  - **State preservation** — pagination links include the current `per_page`
+    value and, on the Albums page, the active `cat` category-filter parameter,
+    so filter context is never lost while navigating between pages.
+
+  - **Database-level queries** — `LIMIT / OFFSET` is applied at the SQL layer.
+    The list views no longer fetch every row into PHP.
+
+  - **`GalleryService::countAdminAlbums(int $cat_id = 0): int`** — count query
+    for the admin album list, with optional category filter.
+
+  - **`GalleryService::getAdminAlbums(int $cat_id, int $page, int $per_page): array`** —
+    paginated album fetch with `cat_name` join and `image_count` subquery.
+
+  - **`GalleryService::countAllCategories(): int`** — count query for the admin
+    category list.
+
+  - **`GalleryService::getPaginatedCategoriesFlat(int $page, int $per_page): array`** —
+    paginated category fetch ordered identically to `getAllCategoriesFlat()`. The
+    full flat list is still fetched once for the parent-name lookup map and for
+    new/edit form dropdowns.
+
+  - **`lum_per_page_selector(string $action, array $preserve, int $current, array $options): string`**
+    in `admin_helpers.php` — renders the per-page `<form>` with optional hidden
+    inputs to preserve active filter params. Submitting resets to page 1.
+
+  - **`lum_admin_pagination(array $pag): string`** in `admin_helpers.php` —
+    renders the Bootstrap 5 pagination `<nav>` from a `lumora_pagination()`
+    descriptor. Returns `''` when total pages ≤ 1.
+
+  - **`albums.php`** — `$all_cats` fetch moved inside the new/edit branch;
+    it is no longer queried on list page loads.
+
+  - Page number validation: `lumora_int()` clamps `?page=` to ≥ 1; the existing
+    `lumora_pagination()` further clamps to `[1, total_pages]` so out-of-range
+    page numbers never produce empty results silently.
+
+- **Automated Database Migrations — Phase 1** (`include/services/SchemaService.php`,
+  `include/migrations/AbstractMigration.php`,
+  `include/migrations/Migration0001_CreateMigrationsTable.php`,
+  `admin/update.php`, `admin/ajax_run_migrations.php`, `admin/dashboard.php`,
+  `admin/includes/admin_helpers.php`, `include/bootstrap.php`, `Lumora/migrate.php`):
+  Implements the schema migration engine that automates database changes between
+  Lumora releases, completing Phase 1 of the two-phase update system.
+  (Phase 2, Item 12, will build the full file-download/replacement workflow on top
+  of this foundation.)
+
+  **Architecture decisions (locked in to constrain Phase 2):**
+  - PHP class migrations with `up()` and `down()` methods — not raw SQL files.
+  - Migration classes live in `include/migrations/` as `Migration{NNNN}_{Description}.php`.
+  - Applied migrations are tracked in a dedicated `{PREFIX}migrations` table —
+    not in the config table, so tracking survives config resets.
+  - `SchemaService` exposes a clean library API (`runPendingMigrations()`,
+    `getPendingMigrations()`) with no UI coupling so Phase 2 can call it directly.
+
+  **`SchemaService`** (`include/services/SchemaService.php`) — new static service class
+  (named `SchemaService` to avoid collision with the existing `MigrationService` class
+  which tracks gallery imports from Coppermine and similar platforms):
+  - `discoverMigrations()` — scans `include/migrations/` for `Migration*.php` files,
+    validates names against the expected pattern, returns sorted class name list.
+  - `getAppliedMigrations()` — queries `{PREFIX}migrations`; returns empty array
+    gracefully when the table does not yet exist.
+  - `getPendingMigrations()` — set difference of discovered vs applied; result is
+    cached per request to avoid repeated DB hits (badge + dashboard both call it).
+  - `hasPendingMigrations()` — convenience bool; used by nav badge and dashboard.
+  - `runPendingMigrations(): array{applied: list<string>, errors: list<string>}` —
+    runs all pending migrations in numeric order; stops on first failure; logs every
+    result via `lumora_log()`; resets request cache after the run.
+  - `rollback(string $migration): bool` — calls `down()` on a single named
+    migration and removes its tracking record.
+  - `getMigrationStatus(): array{applied: list<string>, pending: list<string>}` —
+    returns both lists for the admin UI.
+  - Class name validation before any filesystem path use prevents directory traversal.
+
+  **`AbstractMigration`** (`include/migrations/AbstractMigration.php`) — abstract
+  base class all migration classes must extend:
+  - `abstract up(): void` and `abstract down(): void`.
+  - `tableExists(string $table): bool`, `columnExists(string $table, string $col): bool`,
+    `indexExists(string $table, string $index): bool` — INFORMATION_SCHEMA helpers
+    so migrations can write safe conditional DDL without "table already exists" errors.
+
+  **`Migration0001_CreateMigrationsTable`**
+  (`include/migrations/Migration0001_CreateMigrationsTable.php`) — self-bootstrapping
+  first migration. `up()` creates `{PREFIX}migrations` using `CREATE TABLE IF NOT
+  EXISTS`. After `up()` executes, `SchemaService::runOne()` inserts this migration's
+  record into the newly-created table, completing the bootstrap loop. `down()` drops
+  the table with `DROP TABLE IF EXISTS`.
+
+  **`admin/ajax_run_migrations.php`** — AJAX endpoint called from the Updates page.
+  Validates CSRF and admin session, calls `SchemaService::runPendingMigrations()`,
+  and returns `{success, applied[], errors[], message}` JSON.
+
+  **`admin/update.php`** (extended) — **Database Updates** section added between the
+  version status card and the Check for Updates card:
+  - When schema is current: green ✓ badge + applied count.
+  - When migrations are pending: amber ⚠ badge, list of pending migration class names,
+    and a **🗄 Run Database Update** button. Clicking POSTs to `ajax_run_migrations.php`,
+    shows the result, then reloads the page on success.
+  - The existing application update check and AJAX infrastructure is unchanged.
+
+  **`admin/dashboard.php`** (extended) — amber dismissible warning banner shown when
+  `SchemaService::hasPendingMigrations()` is true; links to `admin/update.php`.
+
+  **`admin/includes/admin_helpers.php`** (extended) — the `!` badge on the **Updates**
+  nav item now appears when *either* a new application version is available *or* schema
+  migrations are pending (`UpdateService::hasCachedUpdate() || SchemaService::hasPendingMigrations()`).
+
+  **`include/bootstrap.php`** (extended) — `SchemaService.php` added to the step 7
+  service class load sequence.
+
+  **`Lumora/migrate.php`** — CLI entry point (PHP CLI only; returns HTTP 403 if
+  accessed via web). Supports `--dry-run`, `--status`, and
+  `--rollback <ClassName>` flags; exits 0 on success, 1 on failure.
+
+- **Unique Table Prefix Generation During Installation** (`install/index.php`, `config.sample.php`):
+  The installer now generates a unique, cryptographically random table prefix for every new
+  Lumora installation instead of always defaulting to `lum_`. This makes table names harder
+  to guess in shared-database environments, adding a layer of defence against automated
+  attacks and SQL injection attempts that rely on known table names.
+
+  - **`ins_generate_prefix()`** — new helper function. Generates a prefix in the format
+    `lum_XXXXXXXX_` where `XXXXXXXX` is 8 lowercase hexadecimal characters derived from
+    `random_bytes(5)`. Example output: `lum_3f9a12b4_`. Uses only letters, digits, and
+    underscores, satisfying all MariaDB/MySQL identifier rules. The fixed `lum_` lead keeps
+    the prefix immediately recognisable as a Lumora installation.
+
+  - **Session persistence** — the generated prefix is stored in `$_SESSION['ins_suggested_prefix']`
+    on the first GET request and reused for the lifetime of the install session. Page refreshes
+    and failed submissions always show the same generated value, preventing confusing prefix
+    changes mid-flow. A forced reinstall (`?force=1`) regenerates a fresh prefix.
+
+  - **Advanced-user override** — the prefix field remains a free-text input so advanced users
+    can specify any prefix that matches `[a-zA-Z0-9_]+`. The field carries an `auto-generated`
+    badge and updated help text explaining the security purpose. Browser-level pattern validation
+    (`pattern="[a-zA-Z0-9_]+"`) prevents invalid characters.
+
+  - **Step 2 confirmation card** — after successful database setup, step 2 now shows a green
+    **Database Configuration Confirmed** summary card displaying the database name and the
+    confirmed prefix in `<code>` with a note to record the value. The card is also shown when
+    step 2 is re-rendered after a validation error (e.g. password mismatch), so the prefix is
+    always visible until the install completes.
+
+  - **Session cleanup** — `$_SESSION['ins_suggested_prefix']` is cleared alongside all other
+    installer session keys when installation completes successfully.
+
+  - **Existing installations unaffected** — all existing galleries running on `lum_` (or any
+    other custom prefix) continue to work without any change. The prefix is read from
+    `config.php` at runtime via `DB_PREFIX`; no application code hard-codes `lum_`. The
+    full `{PREFIX}` substitution path through `LumoraDB::query()`, `schema.sql`, and all
+    service classes was already in place.
+
+  - **`config.sample.php`** — `DB_PREFIX` comment updated to document the new
+    `lum_XXXXXXXX_` format and note that existing `lum_` installs are unaffected.
+
+---
+
 ## [1.7.1] — 2026-06-19
 
 ### Added

@@ -12,7 +12,7 @@ declare(strict_types=1);
  */
 
 /** Importer plugin version. Update only when releasing a new plugin version. */
-define('LUMORA_CPG_IMPORTER_VERSION',     '1.0.1');
+define('LUMORA_CPG_IMPORTER_VERSION',     '1.1.0');
 
 /** Minimum Lumora Gallery version required to run this plugin. */
 define('LUMORA_CPG_IMPORTER_MIN_LUMORA',  '1.5.0');

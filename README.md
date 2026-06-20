@@ -39,7 +39,7 @@ Copy `config.sample.php` to `config.php` and fill in your database details, then
 ```
 Lumora/
 ├── admin/                      Admin panel
-│   ├── includes/               Admin-only helpers (flash messages, page renderer)
+│   ├── includes/               Admin-only helpers (flash messages, per-page selector, pagination controls, page renderer)
 │   ├── index.php               Admin entry point — redirects unauthenticated requests to login
 │   ├── account.php             Account management (username, email, password)
 │   ├── albums.php              Album management
@@ -54,13 +54,14 @@ Lumora/
 │   ├── ajax_dimensions.php     AJAX endpoint for reload-dimensions chunks
 │   ├── ajax_thumbs.php         AJAX endpoint for thumbnail regeneration chunks
 │   ├── ajax_update_check.php   AJAX endpoint for forced update check
+│   ├── ajax_run_migrations.php AJAX endpoint for running schema migrations
 │   ├── categories.php          Category management
 │   ├── config.php              Gallery settings, export/import
 │   ├── dashboard.php           Stats overview
 │   ├── images.php              Image management (edit, delete, move, bulk actions)
 │   ├── migrate.php             Migration hub — discovers and launches importer plugins
 │   ├── tools.php               Admin tools (File Integrity Check, Reload Dimensions, Regenerate Thumbnails, Regenerate Missing Thumbnails)
-│   ├── update.php              Update checker — version status and manual check
+│   ├── update.php              Update checker and migration runner — version status, schema updates, manual check
 │   ├── forgot_password.php  Password recovery — generates a reset link to lumora_recovery.txt
 │   ├── reset_password.php   Password reset — validates token, sets new password
 │   ├── login.php / logout.php
@@ -74,7 +75,11 @@ Lumora/
 │   │   ├── ThumbnailService.php Thumbnail generation, resizing, metadata, batch-add
 │   │   ├── ThemeRenderer.php   All HTML output: pages, grids, breadcrumbs, lightbox
 │   │   ├── MigrationService.php Import status tracking, plugin discovery, event logging
-│   │   └── UpdateService.php   Remote update check, version comparison, 24-hour cache
+│   │   ├── UpdateService.php   Remote update check, version comparison, 24-hour cache
+│   │   └── SchemaService.php   Schema migration engine — discover, run, rollback PHP class migrations
+│   ├── migrations/             Versioned PHP schema migration classes
+│   │   ├── AbstractMigration.php              Base class — up(), down(), tableExists(), columnExists(), indexExists()
+│   │   └── Migration0001_CreateMigrationsTable.php  Self-bootstrapping first migration — creates {PREFIX}migrations table
 │   ├── bootstrap.php           Load order, constants
 │   ├── db.php                  PDO singleton (LumoraDB)
 │   ├── functions.php           Utility helpers and legacy forwarding wrappers
@@ -106,6 +111,7 @@ Lumora/
 ├── ajax_hit.php                Public image view counter endpoint (fire-and-forget POST)
 ├── album.php                   Public album view (pagination, sort, lightbox)
 ├── index.php                   Public home, category browse, special views
+├── migrate.php                 CLI-only schema migration runner (--dry-run, --status, --rollback)
 ├── config.sample.php           Template for manual config.php
 └── version.php                 Version constants
 ```
@@ -159,8 +165,8 @@ migration straightforward — point Lumora at the same `albums/` directory and r
 
 ### Admin panel
 - **Dashboard** — stats cards + latest images
-- **Categories** — create, edit, delete; nested (parent/child); re-parents children on delete; optional cover image (ID-based, falls back to first image in category's albums)
-- **Albums** — create, edit, delete; auto-generated folder names or custom; filesystem directory creation; empty folder removed automatically on album delete
+- **Categories** — paginated list (25/50/100 per page, session-persisted; item count summary; controls above and below the table); create, edit, delete; nested (parent/child); re-parents children on delete; optional cover image (ID-based, falls back to first image in category's albums)
+- **Albums** — paginated list (25/50/100 per page, session-persisted; item count summary; controls above and below the table; category filter preserved across pages); create, edit, delete; auto-generated folder names or custom; filesystem directory creation; empty folder removed automatically on album delete
 - **Images** — per-album paginated image grid (24/page); search images by filename or title (scoped to an album or across all albums; cross-album results include the category › album path); edit title, sort position, and visibility; optional file replacement via multipart upload (validates type, size, image integrity; regenerates thumbnail and updates dimensions/filesize); single-image delete cleans up disk files and resets album/category cover references; bulk delete and bulk move to another album (up to 500 images per AJAX call); per-image thumbnail regeneration
 - **Batch Add** — scan `albums/{folder}/` for new images, process in 50-image AJAX chunks (handles 9000+ without timeout)
 - **Configuration** — all settings in one form; theme selector; live image processor status; gallery behavior and upload limit controls
@@ -244,13 +250,14 @@ migration is a scan-and-index operation — no file conversion needed:
    (e.g. `Xena/Season1/1x01-SinsOfThePast`).
 3. Run **Batch Add** on each album — Lumora indexes the images without touching the files.
 
-The **Coppermine Importer** plugin (`plugins/coppermine-importer/`) automates this entirely — it connects to the Coppermine database directly and imports categories, albums, and image metadata in keyset-paginated AJAX chunks without touching any files. Navigate to **Admin → Import** to run it. After import, use the plugin's **Metadata Sync** tool to carry over category and album cover-thumbnail selections.
+The **Coppermine Importer** plugin (`plugins/coppermine-importer/`) automates this entirely — it connects to the Coppermine database directly and imports categories, albums, and image metadata in keyset-paginated AJAX chunks without touching any files. Navigate to **Admin → Import** to run it. Starting with plugin v1.1.0, album and category cover-thumbnail selections are preserved automatically as part of the import wizard itself. The **Metadata Sync** tool (`Admin → Import → Metadata Sync`) remains available as a fallback for re-applying cover assignments after a stopped import or for galleries imported before v1.1.0.
 
 ---
 
 ## Security Notes
 
 - `config.php` contains database credentials — ensure your web server does not serve it as plain text. Adding an `.htaccess` rule to deny direct access is recommended.
+- **Unique table prefix** — the installer auto-generates a random `lum_XXXXXXXX_` prefix for every new installation, making database table names harder to guess in shared-database environments. Advanced users can override the prefix during installation. Existing installations using `lum_` or any other prefix are entirely unaffected.
 - The `install/` directory should be **deleted or access-restricted** after installation.
 - All POST actions use CSRF tokens. Admin routes require an authenticated session.
 - Passwords are hashed with `password_hash()` / `PASSWORD_DEFAULT`.

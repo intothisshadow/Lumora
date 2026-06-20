@@ -278,7 +278,7 @@ if ($step === 1) {
         lumora_redirect($plugin_url . 'index.php');
     }
 
-    // Pre-compute integer counts for safe JS embedding — never use string methods inside heredoc
+    // Pre-compute integer counts for safe JS embedding — never use string methods inside nowdoc
     $n_cat_int = (int) (($sess['counts'] ?? [])['categories'] ?? 0);
     $n_alb_int = (int) (($sess['counts'] ?? [])['albums']     ?? 0);
     $n_img_int = (int) (($sess['counts'] ?? [])['images']     ?? 0);
@@ -307,6 +307,9 @@ if ($step === 1) {
         . '<span>Images</span><span id="img-status">Waiting&hellip;</span></div>';
     echo '<div class="progress mb-3" style="height:20px;">'
         . '<div id="img-bar" class="progress-bar" role="progressbar" style="width:0%"></div></div>';
+
+    echo '<div class="d-flex justify-content-between small text-muted mb-1">'
+        . '<span>Cover images</span><span id="cov-status">Waiting&hellip;</span></div>';
 
     echo '</div>'; // .mb-3
 
@@ -341,6 +344,7 @@ if ($step === 1) {
   var catStatus = document.getElementById('cat-status');
   var albStatus = document.getElementById('alb-status');
   var imgStatus = document.getElementById('img-status');
+  var covStatus = document.getElementById('cov-status');
   var log       = document.getElementById('log');
   var result    = document.getElementById('result');
   var stopBtn   = document.getElementById('cpg-stop-btn');
@@ -439,11 +443,43 @@ if ($step === 1) {
         if (r.done) {
           imgBar.classList.add('bg-success');
           imgStatus.textContent = imported.images + ' imported \u2713';
-          phase = 'finish';
+          // All images done — proceed to cover assignment even if stopped.
+          // Covers are a single fast call, not a loop, so "stop" only prevents
+          // more image chunks from starting; it doesn't skip this step.
+          phase = 'covers';
+          covStatus.textContent = 'Assigning\u2026';
         }
-        if (stopped) { showStopped(); return; }
+        // Stop mid-import (images not yet done): halt after this chunk.
+        if (stopped && !r.done) { showStopped(); return; }
         setTimeout(runChunk, 50);
       });
+    } else if (phase === 'covers') {
+      // Cover assignment is non-critical and single-call.
+      // Proceed to finish even on network error or server failure.
+      var cxhr  = new XMLHttpRequest();
+      var cbody = 'action=apply_covers&csrf_token=' + encodeURIComponent(CSRF);
+      cxhr.open('POST', AJAX, true);
+      cxhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+      cxhr.timeout = 60000;
+      cxhr.onload = function() {
+        try {
+          var cr = JSON.parse(cxhr.responseText);
+          covStatus.textContent = (cr.updated || 0) + ' assigned \u2713';
+          (cr.warnings || []).forEach(function(e) { addLog('[cover] ' + e); });
+        } catch(e) {
+          addLog('[cover] Could not apply covers \u2014 automatic cover selection will be used');
+          covStatus.textContent = 'skipped';
+        }
+        phase = 'finish';
+        setTimeout(runChunk, 50);
+      };
+      cxhr.ontimeout = cxhr.onerror = function() {
+        addLog('[cover] Cover assignment timed out \u2014 automatic cover selection will be used');
+        covStatus.textContent = 'skipped (timeout)';
+        phase = 'finish';
+        setTimeout(runChunk, 50);
+      };
+      cxhr.send(cbody);
     } else if (phase === 'finish') {
       doPost('finish', function(r) {
         hideStop();
@@ -512,9 +548,9 @@ JSEOF;
         . '</table>';
     echo '<p class="small text-muted">Run <strong>Tools &rarr; File Integrity Check</strong> '
         . 'to verify all image files are present in the correct locations.</p>';
-    echo '<p class="small text-muted">Categories or albums missing a cover image? Use the '
+    echo '<p class="small text-muted">Album or category covers not set as expected? Use the '
         . '<a href="' . h($plugin_url . 'sync_metadata.php') . '">Metadata Sync tool</a> '
-        . 'to fill in cover thumbnail selections from Coppermine.</p>';
+        . 'to re-run cover assignment or fix any that were skipped.</p>';
     echo $warn_html;
     echo '<div class="d-flex gap-2 mt-3">'
         . '<a href="' . h($admin_url . 'tools.php')  . '" class="btn btn-outline-primary btn-sm">Go to Tools</a>'

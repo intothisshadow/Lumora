@@ -17,7 +17,10 @@ define('DB_HOST',    'localhost');         // MySQL/MariaDB hostname
 define('DB_NAME',    'your_database');    // Database name
 define('DB_USER',    'your_user');        // Database username
 define('DB_PASS',    'your_password');    // Database password
-define('DB_PREFIX',  'lum_');             // Table prefix — change before install if sharing a DB
+define('DB_PREFIX',  'lum_');             // Table prefix — the installer generates a unique value
+                                          // in the format lum_XXXXXXXX_ (e.g. lum_3f9a12b4_).
+                                          // Only letters, digits, and underscores are allowed.
+                                          // Existing installations using lum_ continue to work unchanged.
 define('DB_CHARSET', 'utf8mb4');          // Leave as utf8mb4
 
 // ── Installation flag ─────────────────────────────────────────────────────────

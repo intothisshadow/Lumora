@@ -9,6 +9,11 @@ declare(strict_types=1);
  *   - Generates a zero-padded folder name (e.g. "00001") via lumora_generate_folder()
  *     unless the admin specifies a custom folder name.
  *   - Creates the filesystem directory albums/{folder}/ if it doesn't exist.
+ *
+ * List view pagination:
+ *   - per_page: read from ?per_page=N, persisted in $_SESSION['lum_adm_per_page_albums'].
+ *   - page:     read from ?page=N; clamped to [1, total_pages] by lumora_pagination().
+ *   - cat:      optional category filter; preserved in pagination links and per-page form.
  */
 define('LUMORA_ENTRY', true);
 require_once dirname(__DIR__) . '/include/bootstrap.php';
@@ -160,10 +165,11 @@ function album_cat_options(array $cats, int $selected = 0): string
     return $html;
 }
 
-$all_cats = get_all_categories_flat();
-
 // ── New / Edit form ─────────────────────────────────────────────────────────
 if ($action === 'new' || $action === 'edit') {
+    // Only fetch all categories for the dropdown when needed.
+    $all_cats = get_all_categories_flat();
+
     $album = ($action === 'edit' && $id > 0)
         ? LumoraDB::fetchOne('SELECT * FROM `{PREFIX}albums` WHERE id = ?', [$id])
         : null;
@@ -248,41 +254,51 @@ HTML;
 }
 
 // ── List ─────────────────────────────────────────────────────────────────────
+
+// Category filter (preserved in pagination links and per-page form).
 $filter_cat = lumora_int($_GET['cat'] ?? 0, 0, 0);
 
-// Use dedicated queries per code path so each variant uses a proper prepared
-// statement rather than concatenating an integer into the SQL string.
-if ($filter_cat > 0) {
-    $albums = LumoraDB::fetchAll(
-        'SELECT a.*, c.name AS cat_name,
-                (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
-         FROM `{PREFIX}albums` a
-         LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id
-         WHERE a.category_id = ?
-         ORDER BY c.name ASC, a.pos ASC, a.title ASC',
-        [$filter_cat]
-    );
+// Per-page: read from GET, persist in session, fall back to default of 25.
+$valid_per_page = [25, 50, 100];
+$raw_per_page   = lumora_int($_GET['per_page'] ?? 0, 0, 0);
+if (in_array($raw_per_page, $valid_per_page, true)) {
+    $_SESSION['lum_adm_per_page_albums'] = $raw_per_page;
+    $per_page = $raw_per_page;
 } else {
-    $albums = LumoraDB::fetchAll(
-        'SELECT a.*, c.name AS cat_name,
-                (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
-         FROM `{PREFIX}albums` a
-         LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id
-         ORDER BY c.name ASC, a.pos ASC, a.title ASC'
-    );
+    $per_page = (int) ($_SESSION['lum_adm_per_page_albums'] ?? 25);
+    if (!in_array($per_page, $valid_per_page, true)) $per_page = 25;
 }
 
+// Current page (lumora_pagination() will clamp it to [1, total_pages]).
+$page = lumora_int($_GET['page'] ?? 1, 1, 1);
+
+// Database queries — only records for the current page are loaded.
+$total  = GalleryService::countAdminAlbums($filter_cat);
+$albums = GalleryService::getAdminAlbums($filter_cat, $page, $per_page);
+
+// Pagination descriptor. URL pattern preserves cat and per_page.
+$url_params  = 'per_page=' . $per_page;
+if ($filter_cat > 0) {
+    $url_params = 'cat=' . $filter_cat . '&' . $url_params;
+}
+$url_pattern = $base . '?' . $url_params . '&page=%d';
+$pag         = lumora_pagination($total, $per_page, $page, $url_pattern);
+
+// Row HTML.
 $rows = '';
 if (empty($albums)) {
-    $rows = '<tr><td colspan="7" class="text-center text-muted py-4">No albums yet. <a href="' . $base_h . '?action=new">Create one</a>.</td></tr>';
+    $empty_msg = ($total === 0)
+        ? 'No albums yet. <a href="' . $base_h . '?action=new">Create one</a>.'
+        : 'No albums on this page.';
+    $rows = '<tr><td colspan="7" class="text-center text-muted py-4">' . $empty_msg . '</td></tr>';
 } else {
     foreach ($albums as $a) {
-        $title_h  = h($a['title']);
-        $cat_h    = h($a['cat_name'] ?? '—');
-        $folder_h = h($a['folder']);
-        $vis_h    = $a['visibility'] ? '<span class="badge bg-secondary">Private</span>' : '<span class="badge bg-success">Public</span>';
-        $img_cnt  = number_format((int)$a['image_count']);
-        $edit_url = h($base . '?action=edit&id=' . (int)$a['id']);
+        $title_h    = h($a['title']);
+        $cat_h      = h($a['cat_name'] ?? '—');
+        $folder_h   = h($a['folder']);
+        $vis_h      = $a['visibility'] ? '<span class="badge bg-secondary">Private</span>' : '<span class="badge bg-success">Public</span>';
+        $img_cnt    = number_format((int)$a['image_count']);
+        $edit_url   = h($base . '?action=edit&id=' . (int)$a['id']);
         $batch_url  = h(lumora_base_url() . 'admin/batch.php?album=' . (int)$a['id']);
         $images_url = h(lumora_base_url() . 'admin/images.php?album=' . (int)$a['id']);
         $view_url   = h(lumora_base_url() . 'album.php?album=' . (int)$a['id']);
@@ -313,14 +329,41 @@ HTML;
     }
 }
 
-$total  = count($albums);
-$new_h  = h($base . '?action=new');
-$content = '<div class="d-flex justify-content-between align-items-center mb-3">'
-    . '<span class="text-muted">' . $total . ' ' . ($total === 1 ? 'album' : 'albums') . '</span>'
+// Item count summary.
+if ($total === 0) {
+    $summary = '0 albums';
+} else {
+    $label   = $total === 1 ? 'album' : 'albums';
+    $summary = 'Showing ' . $pag['start_item'] . '–' . $pag['end_item'] . ' of ' . $total . ' ' . $label;
+}
+
+// Per-page selector form (preserves cat filter).
+$preserve     = $filter_cat > 0 ? ['cat' => $filter_cat] : [];
+$per_page_sel = lum_per_page_selector($base, $preserve, $per_page);
+$pag_html     = lum_admin_pagination($pag);
+$new_h        = h($base . '?action=new');
+
+// Wrap pagination in a centred flex bar.
+$pag_bar = $pag_html
+    ? '<div class="d-flex justify-content-center my-2">' . $pag_html . '</div>'
+    : '';
+
+$content =
+    // Header: summary left, controls + new-album button right.
+    '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">'
+    . '<span class="text-muted small">' . $summary . '</span>'
+    . '<div class="d-flex align-items-center gap-2">'
+    . $per_page_sel
     . '<a href="' . $new_h . '" class="btn btn-primary btn-sm">+ New Album</a>'
     . '</div>'
+    . '</div>'
+    // Top pagination.
+    . $pag_bar
+    // Table.
     . '<div class="table-responsive"><table class="table table-hover lum-adm-table align-middle">'
     . '<thead><tr><th>Title</th><th>Category</th><th>Folder</th><th>Images</th><th>Visibility</th><th>Actions</th><th></th></tr></thead>'
-    . '<tbody>' . $rows . '</tbody></table></div>';
+    . '<tbody>' . $rows . '</tbody></table></div>'
+    // Bottom pagination.
+    . $pag_bar;
 
 lum_admin_page('Albums', $content, 'albums');

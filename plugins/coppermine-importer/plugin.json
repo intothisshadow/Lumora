@@ -2,7 +2,7 @@
   "id":          "coppermine-importer",
   "type":        "importer",
   "name":        "Coppermine Importer",
-  "version":     "1.0.1",
+  "version":     "1.1.0",
   "min_lumora":  "1.5.0",
   "description": "Migrates categories, albums, and image metadata from Coppermine Gallery (CPG 1.4–1.6) to Lumora. Image files are not moved; existing Coppermine album folders are referenced in place.",
   "author":      "Ariane",

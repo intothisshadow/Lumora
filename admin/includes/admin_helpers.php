@@ -4,9 +4,11 @@ declare(strict_types=1);
  * Lumora Gallery — Admin Helpers
  *
  * Shared utilities for the admin panel:
- *   lum_admin_page()      — render a full admin page
- *   lum_admin_alert()     — flash messages via session
- *   lum_admin_nav_item()  — sidebar nav item helper
+ *   lum_flash()             — queue a flash message
+ *   lum_flash_html()        — render and clear queued flash messages
+ *   lum_per_page_selector() — render a per-page size selector form
+ *   lum_admin_pagination()  — render Bootstrap 5 pagination controls
+ *   lum_admin_page()        — render a full admin page
  *
  * @copyright Copyright (C) 2025 Ariane
  * @license   GPL-3.0-or-later <https://www.gnu.org/licenses/gpl-3.0>
@@ -44,6 +46,109 @@ function lum_flash_html(): string
     return $html;
 }
 
+// ── Pagination helpers ────────────────────────────────────────────────────────
+
+/**
+ * Render a per-page size selector form for admin list pages.
+ *
+ * Submitting the form resets to page 1 (no page= param in the form).
+ * Extra GET params (e.g. category filter) are preserved as hidden inputs.
+ *
+ * @param string    $action   Raw form action URL (the page file URL, no query string).
+ * @param array     $preserve Extra GET params to preserve, keyed by name. Values of
+ *                            0 or '' are omitted (treated as "not active").
+ * @param int       $current  Currently selected items-per-page value.
+ * @param list<int> $options  Available page-size options.
+ * @return string HTML <form> for per-page selection.
+ */
+function lum_per_page_selector(
+    string $action,
+    array  $preserve = [],
+    int    $current  = 25,
+    array  $options  = [25, 50, 100]
+): string {
+    $hidden = '';
+    foreach ($preserve as $k => $v) {
+        $vs = (string) $v;
+        if ($vs !== '' && $vs !== '0') {
+            $hidden .= '<input type="hidden" name="' . h((string) $k) . '" value="' . h($vs) . '">';
+        }
+    }
+
+    $opts = '';
+    foreach ($options as $opt) {
+        $sel   = ($opt === $current) ? ' selected' : '';
+        $opts .= '<option value="' . $opt . '"' . $sel . '>' . $opt . '</option>';
+    }
+
+    return '<form method="get" action="' . h($action) . '" class="d-inline-flex align-items-center gap-1">'
+        . $hidden
+        . '<label class="text-muted small mb-0 me-1">Per page:</label>'
+        . '<select name="per_page" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">'
+        . $opts
+        . '</select>'
+        . '</form>';
+}
+
+/**
+ * Render Bootstrap 5 pagination controls.
+ *
+ * Displays a window of page numbers (±2 around current) plus first and last,
+ * with ellipsis indicators for gaps. Returns '' when there is only one page.
+ *
+ * @param array $pag Pagination descriptor returned by lumora_pagination().
+ * @return string    HTML <nav> element, or '' when pagination is not needed.
+ */
+function lum_admin_pagination(array $pag): string
+{
+    if ($pag['total_pages'] <= 1) return '';
+
+    $current = $pag['current_page'];
+    $total   = $pag['total_pages'];
+
+    // Collect page numbers to render: always include first, last, and a ±2 window.
+    $pages = [];
+    for ($p = 1; $p <= $total; $p++) {
+        if ($p === 1 || $p === $total || abs($p - $current) <= 2) {
+            $pages[] = $p;
+        }
+    }
+
+    $html = '<nav aria-label="Page navigation"><ul class="pagination pagination-sm mb-0 flex-wrap">';
+
+    // Previous button.
+    if ($pag['has_prev']) {
+        $html .= '<li class="page-item"><a class="page-link" href="' . h((string) $pag['prev_url']) . '">‹ Prev</a></li>';
+    } else {
+        $html .= '<li class="page-item disabled"><span class="page-link">‹ Prev</span></li>';
+    }
+
+    // Numbered page links with ellipsis gaps.
+    $prev_p = null;
+    foreach ($pages as $p) {
+        if ($prev_p !== null && $p > $prev_p + 1) {
+            $html .= '<li class="page-item disabled"><span class="page-link">…</span></li>';
+        }
+        if ($p === $current) {
+            $html .= '<li class="page-item active" aria-current="page"><span class="page-link">' . $p . '</span></li>';
+        } else {
+            $url   = h(sprintf($pag['url_pattern'], $p));
+            $html .= '<li class="page-item"><a class="page-link" href="' . $url . '">' . $p . '</a></li>';
+        }
+        $prev_p = $p;
+    }
+
+    // Next button.
+    if ($pag['has_next']) {
+        $html .= '<li class="page-item"><a class="page-link" href="' . h((string) $pag['next_url']) . '">Next ›</a></li>';
+    } else {
+        $html .= '<li class="page-item disabled"><span class="page-link">Next ›</span></li>';
+    }
+
+    $html .= '</ul></nav>';
+    return $html;
+}
+
 // ── Page renderer ─────────────────────────────────────────────────────────────
 
 /**
@@ -77,8 +182,9 @@ function lum_admin_page(string $title, string $content, string $active = ''): ne
           . '</div>'
         : '';
 
-    // Badge on the Updates nav item — cache-only, no HTTP call.
-    $update_badge = UpdateService::hasCachedUpdate()
+    // Badge on the Updates nav item — shown when a new version is available OR
+    // when schema migrations are pending. Cache-only reads; no HTTP call.
+    $update_badge = (UpdateService::hasCachedUpdate() || SchemaService::hasPendingMigrations())
         ? ' <span class="badge bg-danger" style="font-size:.6rem;vertical-align:middle;line-height:1">!</span>'
         : '';
 

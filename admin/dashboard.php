@@ -40,6 +40,18 @@ if ($upd['status'] === 'update_available' && $upd['latest'] !== null) {
         . '</div>';
 }
 
+// ── Migration notice (cache-only — no HTTP call) ─────────────────────────────
+$migration_notice = '';
+if (SchemaService::hasPendingMigrations()) {
+    $updates_url_h    = h(lumora_base_url() . 'admin/update.php');
+    $migration_notice = '<div class="alert alert-warning alert-dismissible fade show py-2 mb-4" role="alert">'
+        . '⚠ <strong>Database update required.</strong> '
+        . 'Lumora has schema migrations that need to be applied.'
+        . ' <a href="' . $updates_url_h . '" class="btn btn-sm btn-warning ms-2">Run Database Update</a>'
+        . '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>'
+        . '</div>';
+}
+
 // ── Stat cards ─────────────────────────────────────────────────────────────
 $s_cat  = number_format($stats['categories']);
 $s_alb  = number_format($stats['albums']);
@@ -116,5 +128,5 @@ if (!empty($latest)) {
     $latest_html .= '</div>';
 }
 
-$content = $update_notice . $stat_html . $ql . $latest_html;
+$content = $update_notice . $migration_notice . $stat_html . $ql . $latest_html;
 lum_admin_page('Dashboard', $content, 'dashboard');

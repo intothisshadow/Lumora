@@ -4,6 +4,20 @@ Long-term archive of completed work, migrated from TODO.md on release.
 
 ---
 
+## v1.8.0 — Released 2026-06-20
+
+### Added
+
+- [x] **Admin UI Pagination — Albums and Categories** (TODO item 2): Database-level `LIMIT / OFFSET` pagination added to both Admin → Albums and Admin → Categories list pages. Page size selector (25 / 50 / 100 items per page) auto-submits and persists selection in `$_SESSION` (`lum_adm_per_page_albums`, `lum_adm_per_page_categories`). Bootstrap 5 pagination `<nav>` rendered above and below each table with previous/next, a ±2 page-number window, and ellipsis indicators. Item count summary shows "Showing X–Y of N items" on every page. Category filter preserved across album-list pages. Out-of-range page numbers clamped safely. `GalleryService::countAdminAlbums()`, `getAdminAlbums()`, `countAllCategories()`, and `getPaginatedCategoriesFlat()` added. `lum_per_page_selector()` and `lum_admin_pagination()` helpers added to `admin/includes/admin_helpers.php`.
+
+- [x] **Coppermine Importer — In-wizard cover image assignment** (TODO item 5, plugin bumped to v1.1.0): Album and category cover images (`cpg_albums.thumb`, `cpg_categories.thumb`) are now preserved automatically as part of the main import wizard. A dedicated **Cover images** phase (`apply_covers`) runs after all images have been imported and the full CPG→Lumora ID maps are in session. `CoppermineImporter::importCovers(array $cat_id_map, array $album_id_map): array` added — resolves each CPG thumb via `pid → (aid, filename) → album_id_map[aid] → Lumora image_id`, writes all updates in a single transaction with per-row rollback on failure, returns `{updated, skipped, warnings}`. `case 'apply_covers':` added to `ajax_import.php`. Wizard JS gains a `'covers'` phase between `'images'` and `'finish'`; the Stop button halts mid-images but cover assignment always runs once all images are complete (single fast call). Step 3 UI gains a **Cover images** status row. Plugin files bumped: `version.php`, `plugin.json`, `README.md`.
+
+- [x] **Automated Database Migrations — Phase 1** (TODO item 8): Schema migration engine automating database changes between releases. `SchemaService` static service class (`include/services/SchemaService.php`) with `discoverMigrations()`, `getAppliedMigrations()`, `getPendingMigrations()`, `hasPendingMigrations()`, `runPendingMigrations(): array{applied, errors}`, `getMigrationStatus()`, and `rollback()`. `AbstractMigration` abstract base class (`include/migrations/AbstractMigration.php`) with `up()`, `down()`, `tableExists()`, `columnExists()`, `indexExists()`. Self-bootstrapping `Migration0001_CreateMigrationsTable` creates and records itself in `{PREFIX}migrations` on first run. Admin → Updates page extended with a Database Updates section (green ✓ when current, amber ⚠ + Run button when pending). Dashboard shows amber dismissible banner when migrations are pending. Updates nav badge fires when migrations are pending. `admin/ajax_run_migrations.php` AJAX endpoint. CLI entry point `migrate.php` (`--dry-run`, `--status`, `--rollback <ClassName>`). `SchemaService` loaded in `bootstrap.php` step 7.
+
+- [x] **Unique Database Table Prefix Generation** (TODO item 9): Installer now auto-generates a cryptographically random table prefix (`lum_XXXXXXXX_`, 8 lowercase hex chars via `bin2hex(random_bytes(5))`) for every new installation. Generated prefix stored in `$_SESSION['ins_suggested_prefix']` for the install session lifetime; page refreshes keep the same value. Force-reinstall (`?force=1`) regenerates a fresh prefix. Advanced users may override via the editable prefix field (pattern `[a-zA-Z0-9_]+`). Step 2 confirmation card shows the confirmed prefix in `<code>`. Session key cleared on successful completion. Existing installations using `lum_` or any other prefix are entirely unaffected — prefix is read from `config.php` at runtime. `config.sample.php` updated to document the new format.
+
+---
+
 ## v1.7.1 — Released 2026-06-19
 
 ### Bug Fixes

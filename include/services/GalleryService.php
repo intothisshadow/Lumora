@@ -176,6 +176,38 @@ class GalleryService
         return $result;
     }
 
+    // ── Admin Category Queries ────────────────────────────────────────────────
+
+    /**
+     * Count all categories.
+     *
+     * @return int Total category count.
+     */
+    public static function countAllCategories(): int
+    {
+        return (int) LumoraDB::fetchValue('SELECT COUNT(*) FROM `{PREFIX}categories`');
+    }
+
+    /**
+     * Get a paginated flat list of categories for the admin UI.
+     *
+     * Ordered identically to getAllCategoriesFlat() so the paginated list is
+     * consistent with the full list used in dropdowns and parent lookups.
+     *
+     * @param int $page     1-based page number.
+     * @param int $per_page Categories per page.
+     * @return list<array{id: int, name: string, parent_id: int, pos: int, description: string}>
+     */
+    public static function getPaginatedCategoriesFlat(int $page, int $per_page): array
+    {
+        $offset = max(0, ($page - 1) * $per_page);
+        return LumoraDB::fetchAll(
+            'SELECT * FROM `{PREFIX}categories` ORDER BY parent_id ASC, pos ASC, name ASC
+             LIMIT ? OFFSET ?',
+            [$per_page, $offset]
+        );
+    }
+
     // ── Albums ────────────────────────────────────────────────────────────────
 
     /**
@@ -229,6 +261,65 @@ class GalleryService
     public static function incrementAlbumHits(int $album_id): void
     {
         LumoraDB::query('UPDATE `{PREFIX}albums` SET hits = hits + 1 WHERE id = ?', [$album_id]);
+    }
+
+    // ── Admin Album Queries ───────────────────────────────────────────────────
+
+    /**
+     * Count albums for the admin list, with optional category filter.
+     *
+     * @param int $cat_id Filter by category; 0 = all categories.
+     * @return int Total album count.
+     */
+    public static function countAdminAlbums(int $cat_id = 0): int
+    {
+        if ($cat_id > 0) {
+            return (int) LumoraDB::fetchValue(
+                'SELECT COUNT(*) FROM `{PREFIX}albums` WHERE category_id = ?',
+                [$cat_id]
+            );
+        }
+        return (int) LumoraDB::fetchValue('SELECT COUNT(*) FROM `{PREFIX}albums`');
+    }
+
+    /**
+     * Get a paginated list of albums for the admin UI.
+     *
+     * Includes cat_name (categories join) and image_count (approved images only).
+     * Ordered by category name, album position, then title.
+     *
+     * @param int $cat_id   Filter by category; 0 = all categories.
+     * @param int $page     1-based page number.
+     * @param int $per_page Albums per page.
+     * @return list<array{id: int, category_id: int, folder: string, title: string,
+     *                    description: string, visibility: int, pos: int, hits: int,
+     *                    thumb_image_id: int, created_at: string,
+     *                    cat_name: string|null, image_count: int}>
+     */
+    public static function getAdminAlbums(int $cat_id, int $page, int $per_page): array
+    {
+        $offset = max(0, ($page - 1) * $per_page);
+        if ($cat_id > 0) {
+            return LumoraDB::fetchAll(
+                'SELECT a.*, c.name AS cat_name,
+                        (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
+                 FROM `{PREFIX}albums` a
+                 LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id
+                 WHERE a.category_id = ?
+                 ORDER BY c.name ASC, a.pos ASC, a.title ASC
+                 LIMIT ? OFFSET ?',
+                [$cat_id, $per_page, $offset]
+            );
+        }
+        return LumoraDB::fetchAll(
+            'SELECT a.*, c.name AS cat_name,
+                    (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
+             FROM `{PREFIX}albums` a
+             LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id
+             ORDER BY c.name ASC, a.pos ASC, a.title ASC
+             LIMIT ? OFFSET ?',
+            [$per_page, $offset]
+        );
     }
 
     // ── Images ────────────────────────────────────────────────────────────────

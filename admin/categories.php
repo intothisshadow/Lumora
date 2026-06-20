@@ -4,6 +4,12 @@ declare(strict_types=1);
  * Lumora Gallery — Admin: Category Management
  *
  * Actions: list (default), new, edit, save, delete
+ *
+ * List view pagination:
+ *   - per_page: read from ?per_page=N, persisted in $_SESSION['lum_adm_per_page_categories'].
+ *   - page:     read from ?page=N; clamped to [1, total_pages] by lumora_pagination().
+ *   - $all_cats (full flat list) is fetched unconditionally: used for the parent-name
+ *     lookup map in the list view AND for the parent dropdown in the new/edit form.
  */
 define('LUMORA_ENTRY', true);
 require_once dirname(__DIR__) . '/include/bootstrap.php';
@@ -87,12 +93,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// ── Render ─────────────────────────────────────────────────────────────────────
+// ── Common setup ──────────────────────────────────────────────────────────────
+// $all_cats is used for: (1) new/edit parent dropdown, (2) id→name map in list.
 $all_cats = get_all_categories_flat();
 $csrf     = h(lumora_csrf_token());
 $base_h   = h($base);
 
-// Build parent dropdown helper
+// Build parent dropdown helper.
 function cat_parent_options(array $cats, int $exclude_id = 0, int $selected = 0): string
 {
     $html = '<option value="0">— Root (no parent) —</option>';
@@ -161,16 +168,46 @@ HTML;
 }
 
 // ── List ─────────────────────────────────────────────────────────────────────
-// Build ID→name map for parent lookup.
+
+// Build id→name map from the full category list (used for parent-name lookup).
+// This covers categories that may not be on the current page.
 $cat_map = array_column($all_cats, 'name', 'id');
 
-$rows = '';
-if (empty($all_cats)) {
-    $rows = '<tr><td colspan="5" class="text-center text-muted py-4">No categories yet. <a href="' . $base_h . '?action=new">Create one</a>.</td></tr>';
+// Per-page: read from GET, persist in session, fall back to default of 25.
+$valid_per_page = [25, 50, 100];
+$raw_per_page   = lumora_int($_GET['per_page'] ?? 0, 0, 0);
+if (in_array($raw_per_page, $valid_per_page, true)) {
+    $_SESSION['lum_adm_per_page_categories'] = $raw_per_page;
+    $per_page = $raw_per_page;
 } else {
-    foreach ($all_cats as $c) {
+    $per_page = (int) ($_SESSION['lum_adm_per_page_categories'] ?? 25);
+    if (!in_array($per_page, $valid_per_page, true)) $per_page = 25;
+}
+
+// Current page (lumora_pagination() will clamp it to [1, total_pages]).
+$page = lumora_int($_GET['page'] ?? 1, 1, 1);
+
+// Database queries — only records for the current page are loaded.
+$total      = GalleryService::countAllCategories();
+$paged_cats = GalleryService::getPaginatedCategoriesFlat($page, $per_page);
+
+// Pagination descriptor.
+$url_pattern = $base . '?per_page=' . $per_page . '&page=%d';
+$pag         = lumora_pagination($total, $per_page, $page, $url_pattern);
+
+// Row HTML.
+$rows = '';
+if (empty($paged_cats)) {
+    $empty_msg = ($total === 0)
+        ? 'No categories yet. <a href="' . $base_h . '?action=new">Create one</a>.'
+        : 'No categories on this page.';
+    $rows = '<tr><td colspan="5" class="text-center text-muted py-4">' . $empty_msg . '</td></tr>';
+} else {
+    foreach ($paged_cats as $c) {
         $name_h   = h($c['name']);
-        $parent_h = $c['parent_id'] > 0 ? h($cat_map[$c['parent_id']] ?? '—') : '<span class="text-muted">Root</span>';
+        $parent_h = $c['parent_id'] > 0
+            ? h($cat_map[$c['parent_id']] ?? '—')
+            : '<span class="text-muted">Root</span>';
         $edit_url = h($base . '?action=edit&id=' . (int)$c['id']);
         $del_conf = h('Delete category \'' . $c['name'] . '\'? Child items will be moved to parent.');
         $rows .= <<<HTML
@@ -192,13 +229,39 @@ HTML;
     }
 }
 
-$s_total = count($all_cats);
-$content = '<div class="d-flex justify-content-between align-items-center mb-3">'
-    . '<span class="text-muted">' . $s_total . ' ' . ($s_total === 1 ? 'category' : 'categories') . '</span>'
-    . '<a href="' . $base_h . '?action=new" class="btn btn-primary btn-sm">+ New Category</a>'
+// Item count summary.
+if ($total === 0) {
+    $summary = '0 categories';
+} else {
+    $label   = $total === 1 ? 'category' : 'categories';
+    $summary = 'Showing ' . $pag['start_item'] . '–' . $pag['end_item'] . ' of ' . $total . ' ' . $label;
+}
+
+// Per-page selector and pagination controls.
+$per_page_sel = lum_per_page_selector($base, [], $per_page);
+$pag_html     = lum_admin_pagination($pag);
+$new_h        = h($base . '?action=new');
+
+$pag_bar = $pag_html
+    ? '<div class="d-flex justify-content-center my-2">' . $pag_html . '</div>'
+    : '';
+
+$content =
+    // Header: summary left, controls + new-category button right.
+    '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">'
+    . '<span class="text-muted small">' . $summary . '</span>'
+    . '<div class="d-flex align-items-center gap-2">'
+    . $per_page_sel
+    . '<a href="' . $new_h . '" class="btn btn-primary btn-sm">+ New Category</a>'
     . '</div>'
+    . '</div>'
+    // Top pagination.
+    . $pag_bar
+    // Table.
     . '<div class="table-responsive"><table class="table table-hover lum-adm-table align-middle">'
     . '<thead><tr><th>Name</th><th>Parent</th><th>Pos</th><th></th><th></th></tr></thead>'
-    . '<tbody>' . $rows . '</tbody></table></div>';
+    . '<tbody>' . $rows . '</tbody></table></div>'
+    // Bottom pagination.
+    . $pag_bar;
 
 lum_admin_page('Categories', $content, 'categories');

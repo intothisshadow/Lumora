@@ -15,7 +15,7 @@ declare(strict_types=1);
  *   5. config.php  (DB credentials + LUMORA_INSTALLED)
  *   6. db.php      (connects immediately)
  *   7. Service classes: LumoraConfig, GalleryService, ThumbnailService, ThemeRenderer,
- *                       MigrationService, UpdateService
+ *                       MigrationService, UpdateService, SchemaService
  *   8. functions.php  (utility helpers + legacy forwarding wrappers)
  *   9. auth.php
  *  10. thumb.php     (legacy forwarding wrappers → ThumbnailService)
@@ -99,6 +99,7 @@ require_once LUMORA_INCLUDE . 'services/ThumbnailService.php';
 require_once LUMORA_INCLUDE . 'services/ThemeRenderer.php';
 require_once LUMORA_INCLUDE . 'services/MigrationService.php';
 require_once LUMORA_INCLUDE . 'services/UpdateService.php';
+require_once LUMORA_INCLUDE . 'services/SchemaService.php';
 
 // ── 8–11. Legacy includes (wrappers + utilities) ─────────────────────────────
 require_once LUMORA_INCLUDE . 'functions.php';

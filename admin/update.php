@@ -6,6 +6,9 @@ declare(strict_types=1);
  * Displays the current update status and lets administrators manually
  * trigger a check against the Lumora release endpoint.
  *
+ * Also surfaces schema migration status and provides a one-click
+ * "Run Database Update" action (calls SchemaService via AJAX).
+ *
  * On page load only the cached status is shown — no network call is made
  * by PHP.  If the cache is expired the page auto-triggers an AJAX check
  * after the DOM loads so there is never a server-side fetch delay.
@@ -18,8 +21,7 @@ require_once dirname(__DIR__) . '/include/bootstrap.php';
 require_once __DIR__ . '/includes/admin_helpers.php';
 lumora_require_admin();
 
-// Cache-only status — no HTTP call at PHP render time.
-// JS auto-triggers a check via AJAX if the cache is expired.
+// ── Application update status (cache-only, no HTTP call at render time) ───────
 $upd           = UpdateService::getCachedStatus();
 $cache_expired = UpdateService::isCacheExpired();
 
@@ -28,7 +30,40 @@ $ajax_base_js  = json_encode(lumora_base_url() . 'admin/');
 $auto_check_js = $cache_expired ? 'true' : 'false';
 $endpoint_h    = h(UpdateService::getEndpointUrl());
 
-// ── Build initial status block (replaced by JS after AJAX check) ──────────────
+// ── Schema migration status ───────────────────────────────────────────────────
+$mig_status   = SchemaService::getMigrationStatus();
+$mig_pending  = count($mig_status['pending']);
+$mig_applied  = count($mig_status['applied']);
+
+// Build the DB updates card content.
+if ($mig_pending === 0) {
+    $db_updates_block = '<table class="table table-sm mb-0" style="max-width:400px">'
+        . '<tr><th class="text-muted fw-normal" style="width:160px">Schema status</th>'
+        . '<td><span class="badge bg-success">✓ Up to date</span></td></tr>'
+        . '<tr><th class="text-muted fw-normal">Applied</th>'
+        . '<td class="text-muted small">' . $mig_applied . ' migration(s)</td></tr>'
+        . '</table>';
+} else {
+    $pending_items_html = '';
+    foreach ($mig_status['pending'] as $m) {
+        $pending_items_html .= '<li class="small font-monospace">' . h($m) . '</li>';
+    }
+    $db_updates_block = '<table class="table table-sm mb-2" style="max-width:400px">'
+        . '<tr><th class="text-muted fw-normal" style="width:160px">Schema status</th>'
+        . '<td><span class="badge bg-warning text-dark">⚠ ' . $mig_pending . ' pending</span></td></tr>'
+        . '<tr><th class="text-muted fw-normal">Applied</th>'
+        . '<td class="text-muted small">' . $mig_applied . ' migration(s)</td></tr>'
+        . '</table>'
+        . '<p class="small text-muted mb-1">Pending migrations:</p>'
+        . '<ul class="mb-3">' . $pending_items_html . '</ul>'
+        . '<div>'
+        . '<button id="lum-migrate-btn" class="btn btn-warning">🗄 Run Database Update</button>'
+        . '<span id="lum-migrate-spinner" class="text-muted small ms-2 d-none">Running…</span>'
+        . '</div>'
+        . '<div id="lum-migrate-result" class="mt-3"></div>';
+}
+
+// ── Build initial application status block (replaced by JS after AJAX check) ──
 $installed_h = h($upd['installed']);
 
 $status_badge = match($upd['status']) {
@@ -92,12 +127,18 @@ $status_block = <<<HTML
 HTML;
 
 $content = <<<HTML
-<!-- ── Current status ────────────────────────────────────────────────────── -->
+<!-- ── Current application version status ────────────────────────────────── -->
 <div id="lum-update-status" class="lum-adm-card mb-4">
   {$status_block}
 </div>
 
-<!-- ── Check for updates ─────────────────────────────────────────────────── -->
+<!-- ── Database schema updates ───────────────────────────────────────────── -->
+<div class="lum-adm-card mb-4">
+  <h5 class="mb-3">🗄 Database Updates</h5>
+  {$db_updates_block}
+</div>
+
+<!-- ── Check for application updates ─────────────────────────────────────── -->
 <div class="lum-adm-card mb-4">
   <h5 class="mb-2">🔄 Check for Updates</h5>
   <p class="text-muted small mb-3">
@@ -119,7 +160,8 @@ $content = <<<HTML
     <li>Update results are cached locally for 24 hours.</li>
     <li>No gallery content, images, or user data is ever transmitted.</li>
     <li>Update endpoint: <code>{$endpoint_h}</code></li>
-    <li>Downloading and installing updates is a manual process in this version.</li>
+    <li>Downloading and installing application updates is a manual process in this version.</li>
+    <li>Database schema migrations can be applied with one click using the <strong>Run Database Update</strong> button above.</li>
   </ul>
 </div>
 
@@ -130,6 +172,8 @@ document.addEventListener('DOMContentLoaded', function () {
   const CSRF       = {$csrf_js};
   const AJAX_BASE  = {$ajax_base_js};
   const AUTO_CHECK = {$auto_check_js};
+
+  // ── Application update check ───────────────────────────────────────────────
 
   const \$btn      = document.getElementById('lum-check-btn');
   const \$spinner  = document.getElementById('lum-check-spinner');
@@ -179,7 +223,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  /** Render the status block HTML from a JSON response object. */
+  /** Render the application status block HTML from a JSON response object. */
   function renderStatus(d) {
     const installed   = esc(d.installed || '');
     const latest      = d.latest ? esc(d.latest) : null;
@@ -229,6 +273,64 @@ document.addEventListener('DOMContentLoaded', function () {
 
     return html;
   }
+
+  // ── Database migration runner ──────────────────────────────────────────────
+
+  const \$migrateBtn = document.getElementById('lum-migrate-btn');
+  if (\$migrateBtn) {
+    \$migrateBtn.addEventListener('click', async function () {
+      const \$migSpinner = document.getElementById('lum-migrate-spinner');
+      const \$migResult  = document.getElementById('lum-migrate-result');
+
+      \$migrateBtn.disabled    = true;
+      \$migrateBtn.textContent = 'Running…';
+      if (\$migSpinner) \$migSpinner.classList.remove('d-none');
+      if (\$migResult)  \$migResult.innerHTML = '';
+
+      try {
+        const resp = await fetch(AJAX_BASE + 'ajax_run_migrations.php', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body   : 'csrf_token=' + encodeURIComponent(CSRF),
+        });
+        if (!resp.ok) throw new Error('Server returned ' + resp.status);
+        const data = await resp.json();
+
+        if (data.success) {
+          if (\$migResult) {
+            \$migResult.innerHTML =
+              '<div class="alert alert-success py-2">✓ ' + esc(data.message) + '</div>';
+          }
+          // Reload the page after a short pause so the updated status is shown.
+          setTimeout(function () { location.reload(); }, 1500);
+        } else {
+          let html = '<div class="alert alert-danger py-2">✗ ' + esc(data.message);
+          if (data.errors && data.errors.length) {
+            html += '<ul class="mb-0 mt-1">'
+              + data.errors.map(function (e) {
+                  return '<li class="small font-monospace">' + esc(e) + '</li>';
+                }).join('')
+              + '</ul>';
+          }
+          html += '</div>';
+          if (\$migResult) \$migResult.innerHTML = html;
+          \$migrateBtn.disabled    = false;
+          \$migrateBtn.textContent = '🗄 Run Database Update';
+        }
+      } catch (err) {
+        if (\$migResult) {
+          \$migResult.innerHTML =
+            '<div class="alert alert-danger py-2">Error: ' + esc(err.message) + '</div>';
+        }
+        \$migrateBtn.disabled    = false;
+        \$migrateBtn.textContent = '🗄 Run Database Update';
+      } finally {
+        if (\$migSpinner) \$migSpinner.classList.add('d-none');
+      }
+    });
+  }
+
+  // ── Shared helpers ─────────────────────────────────────────────────────────
 
   function esc(val) {
     const d = document.createElement('div');

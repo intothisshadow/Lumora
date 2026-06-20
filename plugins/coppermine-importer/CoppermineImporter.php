@@ -415,6 +415,179 @@ final class CoppermineImporter
         return compact('imported', 'skipped', 'missing_files', 'errors', 'done') + ['last_id' => $new_last];
     }
 
+    // ── Cover image import ────────────────────────────────────────────────────
+    //
+    // Integrated into the main import wizard. Called from ajax_import.php action
+    // 'apply_covers' after all images have been imported and both ID maps are
+    // fully populated in session. Uses the exact CPG→Lumora ID maps built during
+    // the import, which is more reliable than the folder/name-path matching the
+    // standalone Metadata Sync tool uses — no filesystem probing required.
+
+    /**
+     * Assign album and category cover images from Coppermine to Lumora.
+     *
+     * Reads cpg_albums.thumb and cpg_categories.thumb (CPG picture IDs) and
+     * resolves each to a Lumora image_id via:
+     *   pid → (aid, filename) → Lumora album_id → Lumora image row.
+     *
+     * All Lumora writes are wrapped in a single transaction; individual row
+     * failures are caught per-row so one bad reference never aborts the batch.
+     * Missing covers fall through to Lumora's automatic cover selection (the
+     * existing thumb_image_id = 0 auto-pick behaviour).
+     *
+     * @param array<int, int> $cat_id_map   CPG cid → Lumora category_id
+     * @param array<int, int> $album_id_map CPG aid → Lumora album_id
+     * @return array{updated: int, skipped: int, warnings: list<string>}
+     */
+    public function importCovers(array $cat_id_map, array $album_id_map): array
+    {
+        $updated  = 0;
+        $skipped  = 0;
+        $warnings = [];
+
+        // ── Fetch CPG album cover pids ─────────────────────────────────────
+        try {
+            $alb_rows = $this->cpg->query(
+                "SELECT `aid`, `thumb`
+                   FROM `{$this->cpg_prefix}albums`
+                  WHERE `category` > 0 AND `thumb` > 0"
+            )->fetchAll();
+        } catch (\Throwable $e) {
+            $warnings[] = 'Could not read album covers from Coppermine: ' . $e->getMessage();
+            return ['updated' => 0, 'skipped' => 0, 'warnings' => $warnings];
+        }
+
+        // ── Fetch CPG category cover pids ──────────────────────────────────
+        try {
+            $cat_rows = $this->cpg->query(
+                "SELECT `cid`, `thumb`
+                   FROM `{$this->cpg_prefix}categories`
+                  WHERE `parent` != -1 AND `thumb` > 0"
+            )->fetchAll();
+        } catch (\Throwable $e) {
+            $warnings[] = 'Could not read category covers from Coppermine: ' . $e->getMessage();
+            return ['updated' => 0, 'skipped' => 0, 'warnings' => $warnings];
+        }
+
+        if (empty($alb_rows) && empty($cat_rows)) {
+            return ['updated' => 0, 'skipped' => 0, 'warnings' => []];
+        }
+
+        // ── Batch-resolve all referenced thumb pids to (aid, filename) ─────
+        $pids = [];
+        foreach ($alb_rows as $r) { $pids[] = (int) $r['thumb']; }
+        foreach ($cat_rows  as $r) { $pids[] = (int) $r['thumb']; }
+
+        $picture_info = $this->fetchCpgPictureInfo($pids);
+
+        // ── Pid → Lumora image_id resolution closure ───────────────────────
+        // Maps one CPG thumb pid to its Lumora image_id using the import maps.
+        // Returns null and appends a warning string on any lookup failure.
+        $resolve_pid = function (int $pid, string $ctx) use (
+            $picture_info, $album_id_map, &$warnings
+        ): ?int {
+            $info = $picture_info[$pid] ?? null;
+            if ($info === null) {
+                $warnings[] = "{$ctx}: cover pid={$pid} not found in CPG pictures, skipped.";
+                return null;
+            }
+
+            $lumora_aid = $album_id_map[$info['aid']] ?? 0;
+            if ($lumora_aid === 0) {
+                $warnings[] = "{$ctx}: cover pid={$pid} belongs to CPG aid={$info['aid']}"
+                    . ' which was not imported, skipped.';
+                return null;
+            }
+
+            $img_id = LumoraDB::fetchValue(
+                'SELECT `id` FROM `{PREFIX}images`'
+                . ' WHERE `album_id` = ? AND `filename` = ? LIMIT 1',
+                [$lumora_aid, $info['filename']]
+            );
+
+            if ($img_id === null) {
+                $warnings[] = "{$ctx}: cover filename '{$info['filename']}'"
+                    . " not found in Lumora album id={$lumora_aid}, skipped.";
+                return null;
+            }
+
+            return (int) $img_id;
+        };
+
+        // ── Apply all updates inside one transaction ───────────────────────
+        LumoraDB::beginTransaction();
+        try {
+            foreach ($alb_rows as $row) {
+                $cpg_aid    = (int) $row['aid'];
+                $pid        = (int) $row['thumb'];
+                $lumora_aid = $album_id_map[$cpg_aid] ?? 0;
+
+                if ($lumora_aid === 0) {
+                    $skipped++;
+                    $warnings[] = "Album aid={$cpg_aid}: not in import map, cover skipped.";
+                    continue;
+                }
+
+                $image_id = $resolve_pid($pid, "Album aid={$cpg_aid}");
+                if ($image_id === null) {
+                    $skipped++;
+                    continue;
+                }
+
+                try {
+                    LumoraDB::update(
+                        'albums',
+                        ['thumb_image_id' => $image_id],
+                        'id = ?',
+                        [$lumora_aid]
+                    );
+                    $updated++;
+                } catch (\Throwable $e) {
+                    $skipped++;
+                    $warnings[] = "Album aid={$cpg_aid}: DB update failed — " . $e->getMessage();
+                }
+            }
+
+            foreach ($cat_rows as $row) {
+                $cpg_cid    = (int) $row['cid'];
+                $pid        = (int) $row['thumb'];
+                $lumora_cid = $cat_id_map[$cpg_cid] ?? 0;
+
+                if ($lumora_cid === 0) {
+                    $skipped++;
+                    $warnings[] = "Category cid={$cpg_cid}: not in import map, cover skipped.";
+                    continue;
+                }
+
+                $image_id = $resolve_pid($pid, "Category cid={$cpg_cid}");
+                if ($image_id === null) {
+                    $skipped++;
+                    continue;
+                }
+
+                try {
+                    LumoraDB::update(
+                        'categories',
+                        ['thumb_image_id' => $image_id],
+                        'id = ?',
+                        [$lumora_cid]
+                    );
+                    $updated++;
+                } catch (\Throwable $e) {
+                    $skipped++;
+                    $warnings[] = "Category cid={$cpg_cid}: DB update failed — " . $e->getMessage();
+                }
+            }
+
+            LumoraDB::commit();
+        } catch (\Throwable $e) {
+            LumoraDB::rollBack();
+            throw $e;
+        }
+
+        return compact('updated', 'skipped', 'warnings');
+    }
+
     // ── Metadata sync (category/album cover thumbnails) ────────────────────────
     //
     // Companion to the import methods above, used by the standalone metadata

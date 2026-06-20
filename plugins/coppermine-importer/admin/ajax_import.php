@@ -7,7 +7,7 @@ declare(strict_types=1);
  * counters) is stored in $_SESSION['lumora_cpg_import'].
  *
  * Expected POST fields:
- *   action      — 'import_categories' | 'import_albums' | 'import_images' | 'finish'
+ *   action      — 'import_categories' | 'import_albums' | 'import_images' | 'apply_covers' | 'finish'
  *   csrf_token  — Standard Lumora CSRF token
  *
  * Returns JSON.
@@ -146,6 +146,55 @@ try {
                 'done'           => $result['done'],
                 'last_id'        => $result['last_id'],
                 'total_imported' => $sess['imported']['albums'],
+            ]);
+
+        // ── Apply cover images ──────────────────────────────────────────────────
+        case 'apply_covers':
+
+            try {
+                $result = $importer->importCovers(
+                    $sess['cat_id_map']   ?? [],
+                    $sess['album_id_map'] ?? []
+                );
+            } catch (\Throwable $e) {
+                // Cover failure must not abort the import — log and return gracefully.
+                MigrationService::logEvent(
+                    LUMORA_CPG_IMPORTER_SOURCE,
+                    MigrationService::LOG_WARNING,
+                    'Cover image assignment failed: ' . $e->getMessage()
+                );
+                cpg_json_ok([
+                    'updated'  => 0,
+                    'skipped'  => 0,
+                    'warnings' => ['Cover assignment error: ' . $e->getMessage()],
+                ]);
+            }
+
+            foreach (array_slice($result['warnings'], 0, 30) as $w) {
+                MigrationService::logEvent(
+                    LUMORA_CPG_IMPORTER_SOURCE,
+                    MigrationService::LOG_WARNING,
+                    $w
+                );
+            }
+
+            if ($result['updated'] > 0 || $result['skipped'] > 0 || !empty($result['warnings'])) {
+                MigrationService::logEvent(
+                    LUMORA_CPG_IMPORTER_SOURCE,
+                    MigrationService::LOG_INFO,
+                    sprintf(
+                        'Cover images: %d assigned, %d skipped, %d warning(s)',
+                        $result['updated'],
+                        $result['skipped'],
+                        count($result['warnings'])
+                    )
+                );
+            }
+
+            cpg_json_ok([
+                'updated'  => $result['updated'],
+                'skipped'  => $result['skipped'],
+                'warnings' => $result['warnings'],
             ]);
 
         // ── Import images ─────────────────────────────────────────────────────

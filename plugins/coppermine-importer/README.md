@@ -3,7 +3,7 @@
 An official Lumora Gallery plugin that migrates categories, albums, and image
 metadata from Coppermine Gallery (CPG 1.4–1.6) to Lumora.
 
-**Plugin version:** 1.0.1  
+**Plugin version:** 1.1.0  
 **Requires Lumora:** 1.5.0+  
 **License:** GPL-3.0-or-later
 
@@ -11,15 +11,51 @@ metadata from Coppermine Gallery (CPG 1.4–1.6) to Lumora.
 
 ## What it imports
 
-| Data             | Imported | Notes                                              |
-|------------------|----------|----------------------------------------------------|
-| Categories       | ✅       | Hierarchy (parent/child) fully preserved           |
-| Albums           | ✅       | Title, description, position, visibility, hit count|
-| Image metadata   | ✅       | Filename, title, dimensions, filesize, hits, date  |
-| Image files      | ❌       | Files are not moved (see File Migration below)     |
-| Thumbnails       | ❌       | Not regenerated — existing `thumb_` files are used |
-| Comments         | ❌       | Not supported in this version                      |
-| User accounts    | ❌       | Not supported (Lumora is single-admin)             |
+| Data                         | Imported | Notes                                                        |
+|------------------------------|----------|--------------------------------------------------------------|
+| Categories                   | ✅       | Hierarchy (parent/child) fully preserved                     |
+| Albums                       | ✅       | Title, description, position, visibility, hit count          |
+| Image metadata               | ✅       | Filename, title, dimensions, filesize, hits, date            |
+| Album cover images           | ✅       | Assigned during import via `cpg_albums.thumb`                |
+| Category cover images        | ✅       | Assigned during import via `cpg_categories.thumb`            |
+| Image files                  | ❌       | Files are not moved (see File Migration below)               |
+| Thumbnails                   | ❌       | Not regenerated — existing `thumb_` files are used           |
+| Comments                     | ❌       | Not supported in this version                                |
+| User accounts                | ❌       | Not supported (Lumora is single-admin)                       |
+
+---
+
+## Cover image import
+
+Album and category cover images (the `thumb` field in `cpg_albums` and
+`cpg_categories`) are assigned automatically at the end of every import run,
+as part of the main wizard.
+
+### How it works
+
+After all images are imported, the wizard sends one `apply_covers` call that:
+
+1. Reads every CPG album and category that has a non-zero `thumb` (cover picture ID).
+2. Resolves each CPG picture ID to its Lumora counterpart via the exact
+   CPG-ID → Lumora-ID maps built during the same import session —
+   no folder matching or filesystem probing required.
+3. Updates `thumb_image_id` on the Lumora album or category row.
+4. Wraps all writes in a single database transaction; individual row failures
+   are caught per-row so one bad reference never aborts the batch.
+
+Missing covers (image not imported, album not imported, or CPG thumb field 0)
+fall through to Lumora's automatic cover selection (`thumb_image_id = 0` →
+auto-pick first approved image), so nothing breaks if a cover can't be resolved.
+
+Cover assignment warnings are written to the migration log and appear in the
+warnings section on the import results page.
+
+### In-wizard vs. post-import Metadata Sync
+
+| Approach | When to use |
+|---|---|
+| **Import wizard** (`apply_covers`) | Preferred — runs automatically, uses exact ID maps from the current import session. |
+| **Metadata Sync tool** | Post-import fallback — use when covers were not set during import (e.g. the import was stopped early), or to re-run cover assignment after making manual changes. |
 
 ---
 
@@ -109,7 +145,7 @@ Images:      8,432
 The single source of truth for the plugin version is `version.php`:
 
 ```php
-define('LUMORA_CPG_IMPORTER_VERSION', '1.0.1');
+define('LUMORA_CPG_IMPORTER_VERSION', '1.1.0');
 ```
 
 This constant is used throughout the codebase for:
@@ -169,6 +205,11 @@ Access it at:
 importer wizard's credentials page and results page), or navigate directly to
 `plugins/coppermine-importer/admin/sync_metadata.php`.
 
+Use the Metadata Sync tool when:
+- The main import was stopped before covers were assigned.
+- You want to re-run cover assignment after making manual changes.
+- You added new images to Coppermine and re-imported only the images.
+
 ### What it syncs
 
 | Data                             | Synced | Notes                                    |
@@ -177,9 +218,8 @@ importer wizard's credentials page and results page), or navigate directly to
 | Album cover-thumbnail            | ✅     | From `cpg_albums.thumb`                  |
 | Categories, albums, image records| ❌     | Use the main importer for those          |
 
-The main import wizard does not carry over cover selections because it processes
-records in small chunks and does not persist the CPG-ID → Lumora-ID map between
-chunks. The sync tool re-derives matches from durable on-disk identifiers:
+The sync tool matches by durable on-disk identifiers rather than import-session
+ID maps (which are not persisted after the wizard completes):
 
 - **Albums** — matched by `folder` (resolved from `cpg_pictures.filepath`,
   falling back to `cpg_albums.keyword`).
