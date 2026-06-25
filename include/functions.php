@@ -279,6 +279,32 @@ function lumora_format_bytes(int $bytes): string
 }
 
 /**
+ * Return a human-readable duration string for a past Unix timestamp.
+ *
+ * Produces strings suitable for appending " ago" at the call site:
+ * "less than a minute", "3 minutes", "2 hours", "4 days".
+ *
+ * @param int $timestamp Unix timestamp of the past moment.
+ */
+function human_time_diff(int $timestamp): string
+{
+    $diff = max(0, time() - $timestamp);
+    if ($diff < 60) {
+        return 'less than a minute';
+    }
+    $mins = (int) ($diff / 60);
+    if ($diff < 3600) {
+        return $mins . ' minute' . ($mins !== 1 ? 's' : '');
+    }
+    $hours = (int) ($diff / 3600);
+    if ($diff < 86400) {
+        return $hours . ' hour' . ($hours !== 1 ? 's' : '');
+    }
+    $days = (int) ($diff / 86400);
+    return $days . ' day' . ($days !== 1 ? 's' : '');
+}
+
+/**
  * Generate a zero-padded album folder name from an album ID, e.g. "00042".
  */
 function lumora_generate_folder(int $id): string

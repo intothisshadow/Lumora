@@ -7,6 +7,9 @@ declare(strict_types=1);
  *   - Update their username and email address.
  *   - Change their password (requires current password verification).
  *
+ * Security note: a 500 ms constant-time delay is enforced on any failed
+ * current-password verification to make automated brute-forcing slower.
+ *
  * V1 is single-user, but the page reads/writes the `users` table so it will
  * continue to work correctly when multi-user support is added in future.
  *
@@ -102,6 +105,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         );
 
         if (!$row || !password_verify($current_pw, $row['password_hash'])) {
+            // 500 ms constant-time delay on verify failure to slow brute force
+            // against the current-password field.
+            usleep(500_000);
             $errors[] = 'Current password is incorrect.';
         }
 

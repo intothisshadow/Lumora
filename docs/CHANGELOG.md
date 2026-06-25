@@ -8,6 +8,329 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 
+## [1.9.0] — 2026-06-25
+
+### Security
+
+- **Login rate limiting** (`admin/login.php`): added IP-based brute-force
+  protection. Failed attempts are tracked in `cache/.login_ratelimit.json`
+  using a 15-minute sliding window. After 5 failures the form is disabled
+  client-side, a 2-second server-side delay is enforced, and a lockout message
+  is shown. Every individual failure also adds a 1-second `usleep()` delay.
+  IP record is cleared on successful authentication.
+
+- **Password-change timing hardening** (`admin/account.php`): added
+  `usleep(500_000)` on `password_verify()` failure in the password-change
+  handler to slow brute-force attempts against the current-password field.
+
+- **ZipArchive path traversal protection** (`include/services/UpdaterService.php`):
+  `stageExtract()` now performs a two-layer path-traversal check: (1) enhanced
+  pre-extraction string validation including null-byte rejection; (2) new
+  post-extraction `realpath()` scan verifying every extracted path resolves
+  within the canonical extraction directory — cleans up and aborts on any escape.
+
+- **File upload double-extension bypass fix** (`include/services/ThumbnailService.php`):
+  `isAllowedImage()` now rejects any filename containing a server-executable
+  extension (`php`, `php3`, `php4`, `php5`, `php7`, `phtml`, `phar`, `shtml`) in
+  any dot-separated segment, not just the last extension. `scanNewImages()` updated
+  to use `isAllowedImage()` consistently.
+
+- **GD image dimension bomb protection** (`include/services/ThumbnailService.php`):
+  `thumbGd()` now validates source image dimensions from `getimagesize()` before
+  calling any `imagecreatefrom*()` function. Rejects images exceeding 50 MP total
+  pixels or 15 000 px on either axis, preventing memory exhaustion from crafted
+  image headers.
+
+- **Backup SQL identifier escaping** (`include/services/UpdaterService.php`):
+  `dumpDatabase()` now applies `str_replace('`', '``', $table)` before
+  interpolating table names into `SHOW CREATE TABLE` and `SELECT *` queries,
+  ensuring correct escaping of any table name that contains a backtick character.
+
+- **Security audit Phase A false-positive documentation**: full code review of
+  all 57 files flagged by the 2026-06-25 PHP Security Scanner confirmed that
+  the overwhelming majority of "Critical" SQL injection and "High" CSRF findings
+  were scanner false positives (scanner fired on `require_once`, `echo
+  json_encode()`, `lumora_int()`-guarded reads, and the CSRF-check lines
+  themselves). All genuine issues are addressed in this release.
+
+### Added
+
+- **Admin Tool: Installation Settings** (`include/services/InstallationService.php`,
+  `admin/installation.php`,
+  `admin/ajax_installation_health.php`,
+  `include/migrations/Migration0002_CreateConfigChangesTable.php`,
+  `admin/includes/admin_helpers.php`,
+  `include/bootstrap.php`,
+  `install/schema.sql`,
+  `version.php`):
+  Completes TODO item 2. Administrators can now update Lumora's installation
+  configuration after moving to a new domain, subdirectory, or server — without
+  manually editing config.php or running raw SQL. Accessible via the new
+  **Administration → Installation** sidebar item.
+
+  **`InstallationService`** (`include/services/InstallationService.php`) — new
+  static service class loaded by bootstrap.php. Responsibilities:
+  - `detectEnvironment()` — reads live PHP superglobals to determine the current
+    protocol, host, and Lumora web-root path; returns `detected_url`, `root_path`,
+    `albums_path`, `cache_path`, `php_version`, `web_server`, and `https` flag.
+    Respects common reverse-proxy headers (`HTTP_X_FORWARDED_PROTO`, `SERVER_PORT`).
+  - `getStoredConfig()` — returns the installation-relevant subset of the stored
+    configuration: `base_url`, `gallery_name`, `db_host`, `db_name`, `db_prefix`.
+    DB credentials are never returned.
+  - `detectChanges()` — compares detected vs. stored values and returns a list of
+    mismatch descriptors (field, label, stored, detected). Also surfaces an HTTPS
+    upgrade hint when the stored URL still uses `http://` but the current connection
+    is served over TLS.
+  - `validateUrl(string $url)` — validates scheme, format, and non-emptiness.
+  - `applySettings(array $settings, int $user_id, string $username, string $ip)` —
+    validates and persists each allowed config key (`base_url` in this version),
+    calls `logConfigChange()` per key, clears application caches, and reloads the
+    in-memory config. Returns `{success, applied[], errors[]}`.
+  - `clearCaches()` — deletes non-hidden files in `cache/`, calls `opcache_reset()`
+    if available, and calls `LumoraConfig::load()` to refresh the in-memory cache.
+  - `runHealthCheck()` — runs nine checks and returns a list of result descriptors
+    (`name`, `status`, `detail`, `ok`). Checks: database connectivity, albums
+    directory accessible and writable, cache directory writable, config.php present,
+    site URL stored and valid, PHP version ≥ 8.2, image processor (Imagick / GD),
+    PDO MySQL extension, ZipArchive extension.
+  - `logConfigChange(...)` — inserts one row into `{PREFIX}config_changes`. Fails
+    silently on pre-v8 installs where the table does not yet exist.
+  - `getRecentChanges(int $limit)` — queries `{PREFIX}config_changes` newest-first;
+    returns empty array gracefully on pre-v8 installs.
+  - `exportSettings()` — returns a JSON snapshot of current stored config and live
+    environment (DB password excluded; labelled `*** not exported ***`).
+
+  **`admin/installation.php`** — new admin page with six sections:
+  - **Current Installation Information** — a read-only table showing stored vs.
+    detected site URL (with HTTPS badge), application root, albums and cache
+    directory paths with writable indicators, DB host/name/prefix (read-only),
+    PHP version, and web server string. Includes an “Export Snapshot (JSON)”
+    button that POSTs to the same page and triggers a JSON download.
+  - **Auto-Detected Changes** — shown only when `InstallationService::detectChanges()`
+    finds a mismatch. Renders a comparison table (stored vs. detected) and a
+    “Copy detected URL into the form” button that pre-fills the update form.
+  - **Migration Helpers** — Bootstrap 5 accordion with four scenario cards:
+    *Domain Change* (replaces the hostname while preserving scheme, port, and path),
+    *Subdirectory Change* (replaces the path component), *HTTPS Enablement*
+    (replaces `http://` with `https://`), and *Server Migration* (accepts a
+    complete new URL). Each card has a helper input and an “Apply to form” button
+    that populates the Site URL field below without submitting.
+  - **Update Installation Settings** — a form with the Site URL field (pre-filled
+    with the stored value), a live change-preview notice (JS-driven, shows old →
+    new before submit), collapsible rollback instructions, and a
+    *Current Password* field (required). Submitting without the correct password
+    is rejected server-side and no changes are applied.
+  - **Health Check** — an AJAX-driven panel. Clicking “Run Health Check” POSTs to
+    `ajax_installation_health.php` and renders the nine-row results table with
+    per-check OK/WARNING/FAIL badges. A summary banner (all clear vs. attention
+    needed) appears above the table.
+  - **Configuration Change Log** — a table of the last 15 entries from
+    `{PREFIX}config_changes`, showing timestamp, admin, IP, setting key, previous
+    value (struck through in red), and new value (green). Empty-state message
+    shown on first visit.
+
+  **`admin/ajax_installation_health.php`** — POST-only AJAX endpoint. Validates
+  admin authentication and CSRF token, then calls
+  `InstallationService::runHealthCheck()` and returns
+  `{checks: [...], all_ok: bool}` JSON. Returns HTTP 403 on auth or CSRF failure,
+  HTTP 405 on non-POST requests, HTTP 500 on unexpected errors.
+
+  **`Migration0002_CreateConfigChangesTable`**
+  (`include/migrations/Migration0002_CreateConfigChangesTable.php`) — second
+  schema migration. `up()` creates `{PREFIX}config_changes` with `CREATE TABLE IF
+  NOT EXISTS`; `down()` drops it. Picked up automatically by `SchemaService` and
+  shown as pending in the admin Updates page until applied.
+
+  **`admin/includes/admin_helpers.php`** (extended) — **Installation** (🖥️) nav
+  item added between Tools and Import in the sidebar.
+
+  **`include/bootstrap.php`** (extended) — `InstallationService.php` added to the
+  step 7 service class load sequence; header comment updated.
+
+  **`install/schema.sql`** (DB version 8) — `{PREFIX}config_changes` table added.
+  Migration comment for v7 → v8 added at the top of the file with the manual
+  `CREATE TABLE` statement for existing installations.
+
+  **`version.php`** — `LUMORA_DB_VERSION` bumped from 7 to 8.
+
+  **New DB table** `{PREFIX}config_changes` (DB version 8):
+  ```sql
+  CREATE TABLE IF NOT EXISTS `lum_config_changes` (
+    `id`         bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id`    int UNSIGNED    NOT NULL DEFAULT 0,
+    `username`   varchar(50)     NOT NULL DEFAULT '',
+    `ip`         varchar(45)     NOT NULL DEFAULT '',
+    `key`        varchar(64)     NOT NULL DEFAULT '',
+    `old_value`  text            NOT NULL,
+    `new_value`  text            NOT NULL,
+    `changed_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `key_changed`  (`key`, `changed_at`),
+    KEY `user_changed` (`user_id`, `changed_at`)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  ```
+  Replace `lum_` with your actual table prefix. Existing installations not yet
+  running Migration0002 degrade gracefully — `logConfigChange()` and
+  `getRecentChanges()` both catch `\Throwable` and fail silently.
+
+- **Dashboard Update System — Phase 2** (`include/services/AbstractUpdateProvider.php`,
+  `include/services/GitHubUpdateProvider.php`,
+  `include/services/UpdaterService.php`,
+  `admin/ajax_update_perform.php`,
+  `admin/update.php`,
+  `include/bootstrap.php`,
+  `include/functions.php`):
+  Completes TODO item 12. Administrators can now install a new Lumora release entirely
+  from within the admin dashboard — no SSH, no manual file extraction. The workflow
+  runs as a sequence of discrete AJAX stages, each reported in real time, with
+  automatic backup and one-click rollback on failure.
+
+  **Stage flow:**
+  `preflight → download → verify → backup → maintenance → extract → validate → replace → migrate → cleanup`
+
+  Each stage is one POST to `admin/ajax_update_perform.php`, returning
+  `{success, stage, message, next, details[]}`. The browser drives the sequence
+  recursively; a 300 ms pause between stages keeps the progress UI visible.
+
+  **`AbstractUpdateProvider`** (`include/services/AbstractUpdateProvider.php`) —
+  abstract base class defining the provider interface: `fetchMetadata()`,
+  `buildArchiveUrl()`, `getName()`. The static factory `createFromConfig()` reads
+  the `update_provider_type` config key (`'github'` by default) and instantiates
+  the appropriate concrete class. New release sources (self-hosted servers,
+  alternative repositories, private enterprise feeds) can be added by implementing
+  this class and registering a match arm in the factory — no changes to the core
+  update workflow are required. Includes a shared `httpGet()` helper that uses
+  a stream context with `set_error_handler` / `restore_error_handler` instead of
+  the `@` operator for clean E_WARNING suppression on TCP failures.
+
+  **`GitHubUpdateProvider`** (`include/services/GitHubUpdateProvider.php`) —
+  concrete provider for the GitHub Releases API
+  (`https://api.github.com/repos/{owner}/{repo}/releases/latest`). Maps
+  `tag_name → latest_version`, `published_at → release_date` (date only),
+  `body → release_notes` (truncated to 2 000 chars), `html_url → changelog_url`.
+  Extracts `minimum_php` and `minimum_db` via regex from the release body
+  (e.g. `Minimum PHP: 8.2`). Searches release assets for a `.sha256` /
+  `sha256sums.txt` / `checksums.txt` file and fetches its content to supply the
+  `sha256` checksum. Repository configurable via `update_github_repo` config key
+  (default: `intothisshadow/Lumora`).
+
+  **`UpdaterService`** (`include/services/UpdaterService.php`) — static service
+  class orchestrating the full 10-stage update workflow. Key design points:
+  - A JSON lock file at `cache/.updates/lock.json` persists state (target version,
+    download URL, SHA-256, paths, maintenance flag) across AJAX calls so no state
+    travels as POST parameters.
+  - `runStage(string $stage, string $version = ''): array` dispatches to one of
+    ten private stage methods; `set_time_limit(180)` applied per stage.
+  - **Pre-flight** (`stagePreflight`): checks `ext-zip`, PHP version compatibility
+    against cached update metadata, disk space (≥ 80 MB), and write permission;
+    fetches download URL + SHA-256 from the configured provider; acquires lock.
+  - **Download** (`stageDownload`): streams archive via `file_get_contents` with
+    a 120 s timeout and up to 5 redirects; resumes if archive already exists.
+  - **Verify** (`stageVerify`): validates SHA-256 checksum when available (logged
+    as a warning when absent — checksums protect against corruption; cryptographic
+    signatures are a planned future enhancement); confirms ZIP structure via
+    `ZipArchive::count()`.
+  - **Backup** (`stageBackup`): copies `config.php`; dumps all prefixed tables to
+    `cache/.updates/backup/database.sql` via PDO (100-row chunks; string-literal-
+    aware SQL splitter for restore).
+  - **Maintenance** (`stageMaintenance`): writes a flag file
+    (`cache/.updates/.maintenance_active`) and calls
+    `LumoraConfig::set('gallery_offline', '1')`.
+  - **Extract** (`stageExtract`): validates all ZIP entry names for path-traversal
+    patterns before extracting a single byte; cleans any prior extract dir first.
+  - **Validate** (`stageValidate`): locates the Lumora app root inside the archive
+    (searches up to 3 directory levels for `version.php`); confirms required paths
+    exist; verifies the declared version string; stores resolved path in lock file.
+  - **Replace** (`stageReplace`): copies files from the extracted root to
+    `LUMORA_ROOT`, skipping always-preserved paths (`config.php`, `albums/`,
+    `cache/`) and optionally-preserved paths (`themes/`, `plugins/` — controlled
+    by `update_preserve_themes` / `update_preserve_plugins` config keys).
+  - **Migrate** (`stageMigrate`): calls `SchemaService::runPendingMigrations()`
+    and surfaces individual migration names and any errors.
+  - **Cleanup** (`stageCleanup`): calls `opcache_reset()`, clears cache files
+    (non-hidden files in `cache/` root only), disables maintenance mode, releases
+    lock. Also called (with `$success = false`) during rollback.
+  - `rollback()`: restores `config.php` and database from backup, then calls
+    `stageCleanup(false)`. File-level rollback is noted as a future enhancement;
+    administrators are advised to maintain server-level file backups.
+  - `forceAbort()`: disables maintenance mode and releases lock without restoration
+    — for stuck sessions where no file replacement has occurred.
+  - `logUpdate()` / `getUpdateLog()`: append-only log at `cache/.updates/update.log`.
+  - `recordUpdateHistory()` / `getUpdateHistory()`: last 10 update attempts stored
+    as JSON in the `update_history` config key.
+
+  **`admin/ajax_update_perform.php`** — AJAX endpoint. Actions: `run_stage`,
+  `rollback`, `abort`. Validates CSRF token and admin session. Version input
+  sanitised with `/^v?[0-9]+(?:\.[0-9]+)*$/`. Unknown stages or actions return
+  HTTP 400 with a JSON error.
+
+  **`admin/update.php`** (extended) — the existing Updates page gains two new cards:
+  - **⬆ Install Update** (shown only when an update is available): confirmation
+    checkbox that must be ticked before the **Update Now** button enables; PHP
+    version compatibility warning when the new release requires a higher PHP
+    version; a 10-row stage progress list with pending/active/done/failed icons
+    (⊙/⟳/✓/✗); a scrollable detail log panel; Rollback and Abort buttons that
+    appear on failure. A stuck-session detection notice with an abort option is
+    shown when the lock file is held but the current browser did not initiate it.
+  - **📋 Update History**: table of the last 10 update attempts (version, date,
+    success/failure) from the `update_history` config key.
+  - JS: `runUpdateStage()` recursive async loop; `markStageActive/Done/Failed()`;
+    `appendLog()`; rollback and abort handlers. Destructive stages (`maintenance`,
+    `replace`, `migrate`, `cleanup`) offer Rollback on failure; earlier stages
+    offer Abort only.
+
+  **`include/bootstrap.php`** (extended) — three new `require_once` lines for
+  `AbstractUpdateProvider`, `GitHubUpdateProvider`, and `UpdaterService` added
+  after the existing step 7 service class loads. Header comment updated.
+
+  **`include/functions.php`** (extended) — `human_time_diff(int $timestamp): string`
+  added under the Formatting section. Produces strings suitable for appending
+  " ago" at the call site (e.g. "3 minutes", "2 hours", "4 days",
+  "less than a minute"). Used by the stuck-session notice in `admin/update.php`.
+
+  **New config keys** (stored in `{PREFIX}config`, no migration required):
+
+  | Key | Default | Description |
+  |-----|---------|-------------|
+  | `update_provider_type` | `github` | Active release provider class |
+  | `update_github_repo` | `intothisshadow/Lumora` | GitHub `owner/repo` for the GitHub provider |
+  | `update_preserve_themes` | `1` | Skip `themes/` during file replacement |
+  | `update_preserve_plugins` | `1` | Skip `plugins/` during file replacement |
+  | `update_history` | JSON array | Last 10 update attempts (newest first) |
+
+  **Working directory layout** (all created on first use; `.htaccess` denies web
+  access on Apache hosts):
+  ```
+  cache/.updates/
+    lock.json              — active update state
+    lumora-v{ver}.zip     — downloaded archive
+    extract/               — extracted archive contents
+    backup/
+      config.php           — config.php snapshot
+      database.sql         — full SQL dump of all prefixed tables
+    update.log             — append-only event log
+    .maintenance_active    — flag file for maintenance mode
+    .htaccess              — Apache deny-all
+  ```
+
+### Changed
+
+- **Updated Lumora Gallery website URL** (`include/services/ThemeRenderer.php`,
+  `include/services/UpdateService.php`, `README.md`): Standardised all
+  references to the official Lumora Gallery website to the new URL
+  (`https://coding.unloved-heart.net/scripts/Lumora`). The "Powered by"
+  credit link in `ThemeRenderer::renderPoweredBy()`, the repository link
+  in the README Development section, and the update-check endpoint constant
+  in `UpdateService` have all been updated. Completes TODO item 1.
+
+### Fixed
+
+- **`admin/installation.php` — Health Check button (and all JS-driven buttons on the page) did nothing** (TODO item 3): The `<script>` block contained `const STORED = {$v_stored_url};` and `urlField.value = {$v_detected_url};`, where `$v_stored_url` and `$v_detected_url` were produced by `h()` (HTML-escaping only), not `json_encode()`. Interpolating a bare URL like `https://example.com/Lumora/` without quotes into a JS expression caused the engine to parse `https:` as a statement label and `//example.com/Lumora/` as a line comment, producing a `SyntaxError` that aborted the entire `<script>` block before `DOMContentLoaded` was registered. All click-driven features on the page were completely dead: **Run Health Check**, the live URL preview, the **Copy detected URL** button, and all four **Migration Helper** "Apply to form" buttons. Fixed by adding `$stored_url_js = json_encode($stored['base_url'])` and `$detected_url_js = json_encode($env['detected_url'])` and using those safely quoted literals in the JS (`const STORED = {$stored_url_js};`, `const DETECTED_URL = {$detected_url_js};`). The two `h()`-escaped `$v_*` variables are retained for use in HTML attributes only, where they remain correct.
+
+---
+
+
+
 ## [1.8.0] — 2026-06-20
 
 ### Added
@@ -553,7 +876,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `admin/ajax_update_check.php`, `admin/includes/admin_helpers.php`, `admin/dashboard.php`,
   `include/bootstrap.php`):
   Lumora can now check for newer releases against a JSON endpoint hosted on the Lumora
-  website (`https://code.unloved-heart.net/lumora/update.json`). No gallery content, user
+  website (`https://coding.unloved-heart.net/lumora/update.json`). No gallery content, user
   data, or identifying information is transmitted — only a plain GET request is made.
 
   - **`UpdateService`** (`include/services/UpdateService.php`) — new static service class.
@@ -600,7 +923,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     "minimum_php":    "8.2",
     "release_date":   "2026-06-15",
     "download_url":   "https://github.com/{owner}/lumora/releases/download/v1.6.0/lumora-v1.6.0.zip",
-    "changelog_url":  "https://code.unloved-heart.net/lumora/changelog"
+    "changelog_url":  "https://coding.unloved-heart.net/lumora/changelog"
   }
   ```
   Additional fields may be added in future without breaking existing installations.
@@ -1520,7 +1843,7 @@ current codebase (all verified by reading each file in full):
   `LICENSE` file added to repository root.
 
 - **Developer credit** — `README.md` Development section lists developer Ariane with
-  repository link (<https://code.unloved-heart.net/lumora/>).
+  repository link (<https://coding.unloved-heart.net/lumora/>).
 
 - **Image view counter** — view counts are now actually recorded when visitors use
   the lightbox. Previously `increment_image_hits()` existed in the codebase but was

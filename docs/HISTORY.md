@@ -4,6 +4,35 @@ Long-term archive of completed work, migrated from TODO.md on release.
 
 ---
 
+## v1.9.0 — Released 2026-06-25
+
+### Security
+
+- [x] **Security Audit Remediation** (TODO item 13): Full code review of 57 files against a 2026-06-25 static-analysis scan (117 Critical + 291 High reported; majority confirmed scanner false positives). Genuine confirmed issues resolved:
+  - **SQL identifier escaping** (`include/services/UpdaterService.php`): `dumpDatabase()` applies `str_replace('`', '``', $table)` before interpolating table names into `SHOW CREATE TABLE`, `SELECT *`, and `INSERT INTO` queries.
+  - **ZipArchive path traversal** (`include/services/UpdaterService.php`): `stageExtract()` adds null-byte pre-check and a post-extraction `realpath()` scan verifying every extracted path resolves within the canonical extraction directory; cleans up and aborts on any escape.
+  - **File upload double-extension bypass** (`include/services/ThumbnailService.php`): `isAllowedImage()` rejects filenames where any dot-separated segment matches a server-executable extension (`php`, `php3`–`php7`, `phtml`, `phar`, `shtml`); `scanNewImages()` updated to call `isAllowedImage()` consistently.
+  - **GD image dimension bomb** (`include/services/ThumbnailService.php`): `thumbGd()` validates source dimensions from `getimagesize()` before calling any `imagecreatefrom*()` function; rejects images exceeding 50 MP total or 15 000 px per axis.
+  - **Login rate limiting** (`admin/login.php`): IP-based brute-force protection via `cache/.login_ratelimit.json` — 5-failure/15-minute sliding window; 1-second per-failure `usleep()` delay; 2-second delay + form and submit button disabled client-side on lockout; IP record cleared on successful authentication.
+  - **Password-change timing hardening** (`admin/account.php`): `usleep(500_000)` added on `password_verify()` failure in the password-change handler.
+  - All remaining audit findings confirmed as scanner false positives (scanner fired on `require_once`, `echo json_encode()`, `lumora_int()`-guarded reads, and the CSRF-check lines themselves); documented in Phase A of the audit item.
+
+### Added
+
+- [x] **Admin Tool: Installation Settings** (TODO item 2): `admin/installation.php` allows administrators to update Lumora's installation configuration after moving to a new domain, subdirectory, or server — no manual `config.php` editing or raw SQL required. New `InstallationService` (`include/services/InstallationService.php`) provides `detectEnvironment()` (live protocol/host/path detection with reverse-proxy header support), `getStoredConfig()`, `detectChanges()` (stored vs. detected mismatch list), `validateUrl()`, `applySettings()` (validated write + audit log + cache clear, requires password re-auth), `clearCaches()` (opcache + LumoraConfig), `runHealthCheck()` (9 checks: DB connectivity, albums dir, cache dir, config.php, site URL, PHP version, image processor, PDO MySQL, ZipArchive), `logConfigChange()`, `getRecentChanges()`, and `exportSettings()` (JSON snapshot, DB password excluded). Page sections: Current Installation Information, Auto-Detected Changes (shown only on mismatch), Migration Helpers accordion (domain change, subdirectory change, HTTPS enablement, full server migration), Update Installation Settings form (password re-auth required, live change-preview), AJAX Health Check panel, Configuration Change Log (last 15 entries). `{PREFIX}config_changes` audit table added via `Migration0002_CreateConfigChangesTable` (`LUMORA_DB_VERSION` bumped from 7 to 8). `InstallationService` loaded in `bootstrap.php` step 7. Installation (🖥️) nav item added to sidebar.
+
+- [x] **Dashboard Update System — Phase 2** (TODO item 12): In-dashboard update installer. 10-stage AJAX workflow: `preflight → download → verify → backup → maintenance → extract → validate → replace → migrate → cleanup`. `AbstractUpdateProvider` (provider interface with `fetchMetadata()`, `buildArchiveUrl()`, `getName()`, static `createFromConfig()` factory), `GitHubUpdateProvider` (GitHub Releases API — maps tag name, date, release notes, SHA-256 from release assets, configurable via `update_github_repo` config key), `UpdaterService` (JSON lock file at `cache/.updates/lock.json` persists state across AJAX calls; per-stage `set_time_limit(180)`; streaming download with 120 s timeout; SHA-256 verification; `config.php` + full DB dump backup in 100-row chunks; path-traversal-safe ZipArchive extraction with pre-extraction string check + post-extraction `realpath()` scan; file replacement preserving `config.php`/`albums/`/`cache/` and optionally `themes/`+`plugins/`; `SchemaService::runPendingMigrations()` after replace; `rollback()` restoring config + DB backup; `forceAbort()` for stuck sessions; append-only log + last-10-attempt JSON history). `admin/ajax_update_perform.php` AJAX endpoint (actions: `run_stage`, `rollback`, `abort`). `admin/update.php` extended with ⬆ Install Update card (confirmation checkbox, PHP compatibility warning, 10-row stage progress list with ⊙/⟳/✓/✗ icons, scrollable detail log, Rollback/Abort buttons on failure) and 📋 Update History table. `human_time_diff()` helper added to `include/functions.php`. `bootstrap.php` updated to require the three new service files. New config keys: `update_provider_type` (`github`), `update_github_repo` (`intothisshadow/Lumora`), `update_preserve_themes` (`1`), `update_preserve_plugins` (`1`), `update_history` (JSON array).
+
+### Changed
+
+- [x] **Updated Lumora Gallery website URL** (TODO item 1): All references to the official Lumora Gallery website standardised to `https://coding.unloved-heart.net/scripts/Lumora` in `ThemeRenderer.php`, `UpdateService.php`, and `README.md`.
+
+### Fixed
+
+- [x] **`admin/installation.php` — Health Check button (and all JS-driven buttons on the page) did nothing** (TODO item 3): `$v_stored_url` and `$v_detected_url` were interpolated bare into JavaScript (`const STORED = {$v_stored_url};`), where `h()`-escaped values like `https://example.com/Lumora/` caused the JS engine to parse `https:` as a statement label and the rest as a comment, producing a `SyntaxError` that aborted the entire `<script>` block silently. Fixed by adding `json_encode()`d counterparts (`$stored_url_js`, `$detected_url_js`) for JS contexts; `h()`-escaped variables retained for HTML attribute use only.
+
+---
+
 ## v1.8.0 — Released 2026-06-20
 
 ### Added

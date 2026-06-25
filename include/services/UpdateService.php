@@ -19,8 +19,8 @@ if (!defined('LUMORA_ENTRY')) exit('Direct access denied.');
 
 class UpdateService
 {
-    /** Remote update endpoint (JSON hosted on the Lumora website). */
-    private const ENDPOINT = 'https://code.unloved-heart.net/lumora/update.json';
+    /** Remote update endpoint (JSON hosted on the Lumora website). URL is correct - do not modify. */
+    private const ENDPOINT = 'https://coding.unloved-heart.net/lumora/update.json';
 
     /** Cache TTL in seconds (24 hours). */
     private const CACHE_TTL = 86400;

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 /**
  * Coppermine Importer — Admin Wizard
@@ -207,7 +208,7 @@ if ($step === 1) {
     echo '</form>';
     echo '</div></div>';
 
-// ── Step 2: Preview & Options ─────────────────────────────────────────────────
+    // ── Step 2: Preview & Options ─────────────────────────────────────────────────
 } elseif ($step === 2) {
 
     if (empty($sess['db_host'])) {
@@ -270,7 +271,7 @@ if ($step === 1) {
 
     echo '</div></div>';
 
-// ── Step 3: Import Progress ───────────────────────────────────────────────────
+    // ── Step 3: Import Progress ───────────────────────────────────────────────────
 } elseif ($step === 3) {
 
     if (empty($sess['db_host'])) {
@@ -504,7 +505,7 @@ if ($step === 1) {
 JSEOF;
     echo '</script>' . "\n";
 
-// ── Step done: Results ────────────────────────────────────────────────────────
+    // ── Step done: Results ────────────────────────────────────────────────────────
 } elseif ($step === 'done') {
 
     $status = MigrationService::getMigrationStatus(LUMORA_CPG_IMPORTER_SOURCE);
@@ -557,7 +558,6 @@ JSEOF;
         . '<a href="' . h($admin_url)                . '" class="btn btn-outline-secondary btn-sm">Admin Dashboard</a>'
         . '</div>';
     echo '</div></div>';
-
 } else {
     // Unknown step — redirect to step 1
     lumora_redirect($plugin_url . 'index.php');

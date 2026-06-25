@@ -132,6 +132,22 @@ class ThumbnailService
 
         [$src_w, $src_h, $type] = $info;
 
+        // Reject images with excessive declared dimensions before allocating a GD
+        // resource.  A crafted file can declare e.g. 50 000×50 000 px in its header
+        // while containing only a few hundred bytes of payload; GD would try to
+        // allocate ~10 GB of RAM before discovering the fraud.
+        // Cap: 50 MP total pixels OR either axis > 15 000 px.
+        $max_pixels = 50_000_000;
+        if ((int) $src_w * (int) $src_h > $max_pixels || $src_w > 15_000 || $src_h > 15_000) {
+            error_log(sprintf(
+                'Lumora: ThumbnailService::thumbGd rejected oversized source image: %s (%dx%d)',
+                $source,
+                $src_w,
+                $src_h
+            ));
+            return false;
+        }
+
         $src = match ($type) {
             IMAGETYPE_JPEG => imagecreatefromjpeg($source),
             IMAGETYPE_PNG  => imagecreatefrompng($source),
@@ -271,10 +287,29 @@ class ThumbnailService
     }
 
     /**
-     * Return true if the filename has an allowed image extension.
+     * Return true if $filename has an allowed image extension AND does not
+     * embed a dangerous server-side extension anywhere in its name.
+     *
+     * Checking only the last extension is insufficient: a file named
+     * 'shell.php.jpg' would pass a naive extension test but could be
+     * executed by a misconfigured web server.  This method rejects any
+     * filename where any dot-separated segment matches a known
+     * server-side-executable extension list.
      */
     public static function isAllowedImage(string $filename): bool
     {
+        $basename = basename($filename);
+
+        // Reject filenames that contain any server-executable extension in any
+        // segment (e.g. 'shell.php.jpg', 'evil.phar.png', 'back.php3.gif').
+        $dangerous = ['php', 'php3', 'php4', 'php5', 'php7', 'phtml', 'phar', 'shtml'];
+        $segments  = array_map('strtolower', explode('.', $basename));
+        foreach ($segments as $segment) {
+            if (in_array($segment, $dangerous, true)) {
+                return false;
+            }
+        }
+
         $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
         return in_array($ext, self::getAllowedExtensions(), true);
     }
@@ -304,16 +339,16 @@ class ThumbnailService
         ));
 
         $skip_prefixes = [LUMORA_THUMB_PREFIX, 'normal_', 'mid_'];
-        $allowed       = self::getAllowedExtensions();
         $new           = [];
 
         foreach (new DirectoryIterator($dir) as $file) {
             if (!$file->isFile()) continue;
 
             $name = $file->getFilename();
-            $ext  = strtolower($file->getExtension());
 
-            if (!in_array($ext, $allowed, true)) continue;
+            // Use isAllowedImage() so the dangerous-extension check is enforced
+            // consistently; this also covers double-extension filenames.
+            if (!self::isAllowedImage($name)) continue;
 
             // Skip generated variants.
             foreach ($skip_prefixes as $pfx) {

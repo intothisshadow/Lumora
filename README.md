@@ -54,14 +54,17 @@ Lumora/
 │   ├── ajax_dimensions.php     AJAX endpoint for reload-dimensions chunks
 │   ├── ajax_thumbs.php         AJAX endpoint for thumbnail regeneration chunks
 │   ├── ajax_update_check.php   AJAX endpoint for forced update check
+│   ├── ajax_update_perform.php AJAX endpoint for multi-stage in-dashboard update (run_stage / rollback / abort)
 │   ├── ajax_run_migrations.php AJAX endpoint for running schema migrations
+│   ├── ajax_installation_health.php  AJAX endpoint for installation health check (9 system checks)
 │   ├── categories.php          Category management
 │   ├── config.php              Gallery settings, export/import
 │   ├── dashboard.php           Stats overview
 │   ├── images.php              Image management (edit, delete, move, bulk actions)
+│   ├── installation.php        Installation Settings — update base URL after domain/server migration; nine-item health check; configuration change log
 │   ├── migrate.php             Migration hub — discovers and launches importer plugins
 │   ├── tools.php               Admin tools (File Integrity Check, Reload Dimensions, Regenerate Thumbnails, Regenerate Missing Thumbnails)
-│   ├── update.php              Update checker and migration runner — version status, schema updates, manual check
+│   ├── update.php              Updates page — version status, in-dashboard updater (10-stage AJAX workflow with rollback), schema migrations, update history
 │   ├── forgot_password.php  Password recovery — generates a reset link to lumora_recovery.txt
 │   ├── reset_password.php   Password reset — validates token, sets new password
 │   ├── login.php / logout.php
@@ -76,10 +79,15 @@ Lumora/
 │   │   ├── ThemeRenderer.php   All HTML output: pages, grids, breadcrumbs, lightbox
 │   │   ├── MigrationService.php Import status tracking, plugin discovery, event logging
 │   │   ├── UpdateService.php   Remote update check, version comparison, 24-hour cache
-│   │   └── SchemaService.php   Schema migration engine — discover, run, rollback PHP class migrations
+│   │   ├── SchemaService.php   Schema migration engine — discover, run, rollback PHP class migrations
+│   │   ├── AbstractUpdateProvider.php  Provider interface — fetchMetadata(), buildArchiveUrl(), factory
+│   │   ├── GitHubUpdateProvider.php    GitHub Releases API provider — metadata, SHA-256, archive URL
+│   │   ├── UpdaterService.php  Update orchestrator — 10-stage workflow, lock file, backup, rollback
+│   │   └── InstallationService.php  Installation settings detection, migration helpers, health checks, audit logging
 │   ├── migrations/             Versioned PHP schema migration classes
 │   │   ├── AbstractMigration.php              Base class — up(), down(), tableExists(), columnExists(), indexExists()
-│   │   └── Migration0001_CreateMigrationsTable.php  Self-bootstrapping first migration — creates {PREFIX}migrations table
+│   │   ├── Migration0001_CreateMigrationsTable.php  Self-bootstrapping first migration — creates {PREFIX}migrations table
+│   │   └── Migration0002_CreateConfigChangesTable.php  Creates {PREFIX}config_changes audit table for installation setting changes
 │   ├── bootstrap.php           Load order, constants
 │   ├── db.php                  PDO singleton (LumoraDB)
 │   ├── functions.php           Utility helpers and legacy forwarding wrappers
@@ -177,6 +185,8 @@ migration straightforward — point Lumora at the same `albums/` directory and r
   - **Regenerate Thumbnails** — regenerates thumbnails via `lumora_generate_thumb()` for every image; runs in 20-image AJAX chunks; respects Imagick/GD availability
   - **Regenerate Missing Thumbnails** — regenerates thumbnails only for images where the thumbnail file is missing or empty, leaving existing valid thumbnails untouched; runs in 500-image AJAX chunks; significantly faster than a full regeneration when only a small fraction of thumbnails are absent (e.g. after manual file additions or a partial batch-add failure)
 - **Account** — update username and email address; change password with current-password verification; **Forgot password** link on the login page generates a secure reset link written to `lumora_recovery.txt` in the gallery root (1-hour single-use token, email attempted if address is set)
+- **Installation Settings** — update the base URL and other installation-specific settings after moving to a new domain, subdirectory, or server; nine-item health check (database connectivity, albums and cache directories, config.php, site URL, PHP version, image processor, PDO MySQL, ZipArchive) runnable on demand via AJAX; configuration change log with full audit trail (last 15 entries from `{PREFIX}config_changes`); JSON environment snapshot export; CSRF and password re-authentication required for all setting changes; Migration Helpers accordion with guided steps for domain changes, subdirectory changes, HTTPS enablement, and server migrations
+- **Updates** — in-dashboard update installer: when a new release is available the Updates page shows an **⬆ Install Update** card with a 10-stage progress UI (`preflight → download → verify → backup → maintenance → extract → validate → replace → migrate → cleanup`); each stage is a separate AJAX call so progress is reported in real time; automatic database and `config.php` backup before any file replacement; one-click Rollback restores the backup on failure; Abort option for stuck sessions; update history table shows the last 10 attempts; custom themes and plugins are preserved by default (`update_preserve_themes` / `update_preserve_plugins` config keys)
 
 ### Themes
 Themes live in `themes/{name}/` and require only `template.html`. The active theme is selected in Admin → Configuration. Multiple themes can be installed simultaneously.
@@ -260,6 +270,7 @@ The **Coppermine Importer** plugin (`plugins/coppermine-importer/`) automates th
 - **Unique table prefix** — the installer auto-generates a random `lum_XXXXXXXX_` prefix for every new installation, making database table names harder to guess in shared-database environments. Advanced users can override the prefix during installation. Existing installations using `lum_` or any other prefix are entirely unaffected.
 - The `install/` directory should be **deleted or access-restricted** after installation.
 - All POST actions use CSRF tokens. Admin routes require an authenticated session.
+- **Login rate limiting** — the admin login page tracks failed attempts per IP address in `cache/.login_ratelimit.json`. After 5 failures within a 15-minute window the form is locked, a 2-second server-side delay is enforced, and a lockout message is shown. Individual failures each add a 1-second delay. The IP record is cleared after a successful login.
 - Passwords are hashed with `password_hash()` / `PASSWORD_DEFAULT`.
 - The **Remember Me** cookie uses a split-token scheme: the validator is stored as
   `SHA-256(validator)` in the database only; the plain value travels only in the
@@ -276,7 +287,7 @@ The **Coppermine Importer** plugin (`plugins/coppermine-importer/`) automates th
 | | |
 |---|---|
 | Developer | Ariane |
-| Repository | <https://code.unloved-heart.net/lumora/> |
+| Repository | <https://coding.unloved-heart.net/scripts/Lumora> |
 
 ---
 

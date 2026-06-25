@@ -1,5 +1,5 @@
 -- Lumora Gallery — Database Schema
--- Version: 7
+-- Version: 8
 -- Requires: MySQL 5.7+ / MariaDB 10.3+
 -- Charset: utf8mb4 / utf8mb4_unicode_ci
 --
@@ -17,8 +17,26 @@
 --   {PREFIX}migration_status        — completed import records per source platform (DB version 6)
 --   {PREFIX}migration_log           — import event log written by importer plugins (DB version 6)
 --   {PREFIX}password_reset_tokens   — single-use admin password-reset tokens (DB version 7)
+--   {PREFIX}config_changes          — configuration change audit log (DB version 8)
 --
--- Migration from DB version 6:
+-- Migration from DB version 7:
+--   Run the CREATE TABLE statement for {PREFIX}config_changes below
+--   (with your actual prefix):
+--
+--     CREATE TABLE IF NOT EXISTS `lum_config_changes` (
+--       `id`         bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+--       `user_id`    int UNSIGNED    NOT NULL DEFAULT 0,
+--       `username`   varchar(50)     NOT NULL DEFAULT '',
+--       `ip`         varchar(45)     NOT NULL DEFAULT '',
+--       `key`        varchar(64)     NOT NULL DEFAULT '',
+--       `old_value`  text            NOT NULL,
+--       `new_value`  text            NOT NULL,
+--       `changed_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+--       PRIMARY KEY (`id`),
+--       KEY `key_changed`  (`key`, `changed_at`),
+--       KEY `user_changed` (`user_id`, `changed_at`)
+--     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+--
 --   Run the CREATE TABLE statement for {PREFIX}password_reset_tokens below
 --   (with your actual prefix):
 --
@@ -303,3 +321,31 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}password_reset_tokens` (
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Single-use admin password-reset split tokens (DB version 7)';
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- config_changes  (DB version 8)
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Audit log for configuration changes applied via the Installation Settings tool
+-- (admin/installation.php). One row per individual setting change.
+-- user_id / username: the administrator who made the change.
+-- ip:                 the request IP address at the time of the change.
+-- key:                config key name (e.g. 'base_url').
+-- old_value / new_value: the previous and new values of that key.
+-- ──────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `{PREFIX}config_changes` (
+  `id`         bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`    int UNSIGNED    NOT NULL DEFAULT 0,
+  `username`   varchar(50)     NOT NULL DEFAULT '',
+  `ip`         varchar(45)     NOT NULL DEFAULT '',
+  `key`        varchar(64)     NOT NULL DEFAULT '',
+  `old_value`  text            NOT NULL,
+  `new_value`  text            NOT NULL,
+  `changed_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `key_changed`  (`key`, `changed_at`),
+  KEY `user_changed` (`user_id`, `changed_at`)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Configuration change audit log (DB version 8)';
+

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 /**
  * Coppermine Importer — Metadata Sync Tool
@@ -103,7 +104,11 @@ if ($action === 'apply') {
     $overwrite = isset($_POST['overwrite']);
 
     $importer = new CoppermineImporter(
-        $sess['db_host'], $sess['db_name'], $sess['db_user'], $sess['db_pass'], $sess['db_prefix']
+        $sess['db_host'],
+        $sess['db_name'],
+        $sess['db_user'],
+        $sess['db_pass'],
+        $sess['db_prefix']
     );
 
     try {
@@ -116,7 +121,7 @@ if ($action === 'apply') {
     }
 
     $matched = count(array_filter($preview['categories'], static fn($r) => $r['lumora_id'] !== null))
-             + count(array_filter($preview['albums'],     static fn($r) => $r['lumora_id'] !== null));
+        + count(array_filter($preview['albums'],     static fn($r) => $r['lumora_id'] !== null));
 
     // ── Timestamped audit-trail file ───────────────────────────────────────
     $log_lines = [
@@ -223,7 +228,7 @@ if ($step === 1) {
     echo '</form>';
     echo '</div></div>';
 
-// ── Step 2: Preview & Apply ───────────────────────────────────────────────────
+    // ── Step 2: Preview & Apply ───────────────────────────────────────────────────
 } elseif ($step === 2) {
 
     if (empty($sess['db_host'])) {
@@ -232,7 +237,11 @@ if ($step === 1) {
     }
 
     $importer = new CoppermineImporter(
-        $sess['db_host'], $sess['db_name'], $sess['db_user'], $sess['db_pass'], $sess['db_prefix']
+        $sess['db_host'],
+        $sess['db_name'],
+        $sess['db_user'],
+        $sess['db_pass'],
+        $sess['db_prefix']
     );
 
     try {
@@ -313,7 +322,7 @@ if ($step === 1) {
     echo '</form>';
     echo '</div></div>';
 
-// ── Step done: Report ─────────────────────────────────────────────────────────
+    // ── Step done: Report ─────────────────────────────────────────────────────────
 } elseif ($step === 'done') {
 
     $report = $_SESSION[$report_key] ?? null;
@@ -356,7 +365,6 @@ if ($step === 1) {
         . '<a href="' . h($admin_url) . '" class="btn btn-outline-secondary btn-sm">Admin Dashboard</a>'
         . '</div>';
     echo '</div></div>';
-
 } else {
     lumora_redirect($self_url);
 }

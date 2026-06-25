@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 /**
  * Coppermine Importer — Core Importer Class
@@ -91,8 +92,14 @@ final class CoppermineImporter
             }
             return array_merge($counts, ['ok' => true, 'cpg_version' => $cpg_version]);
         } catch (\Throwable $e) {
-            return ['ok' => false, 'categories' => 0, 'albums' => 0, 'images' => 0,
-                    'cpg_version' => '', 'error' => $e->getMessage()];
+            return [
+                'ok' => false,
+                'categories' => 0,
+                'albums' => 0,
+                'images' => 0,
+                'cpg_version' => '',
+                'error' => $e->getMessage()
+            ];
         }
     }
 
@@ -142,8 +149,14 @@ final class CoppermineImporter
         $rows = $stmt->fetchAll();
 
         if (empty($rows)) {
-            return ['imported' => 0, 'skipped' => 0, 'errors' => [], 'done' => true,
-                    'last_id' => $last_id, 'id_map' => []];
+            return [
+                'imported' => 0,
+                'skipped' => 0,
+                'errors' => [],
+                'done' => true,
+                'last_id' => $last_id,
+                'id_map' => []
+            ];
         }
 
         $lumora_pdo = LumoraDB::pdo();
@@ -227,8 +240,14 @@ final class CoppermineImporter
         $rows = $stmt->fetchAll();
 
         if (empty($rows)) {
-            return ['imported' => 0, 'skipped' => 0, 'errors' => [], 'done' => true,
-                    'last_id' => $last_id, 'id_map' => []];
+            return [
+                'imported' => 0,
+                'skipped' => 0,
+                'errors' => [],
+                'done' => true,
+                'last_id' => $last_id,
+                'id_map' => []
+            ];
         }
 
         // Fetch actual on-disk paths from cpg_pictures for all aids in this chunk.
@@ -329,8 +348,14 @@ final class CoppermineImporter
         $rows = $stmt->fetchAll();
 
         if (empty($rows)) {
-            return ['imported' => 0, 'skipped' => 0, 'missing_files' => 0,
-                    'errors' => [], 'done' => true, 'last_id' => $last_id];
+            return [
+                'imported' => 0,
+                'skipped' => 0,
+                'missing_files' => 0,
+                'errors' => [],
+                'done' => true,
+                'last_id' => $last_id
+            ];
         }
 
         $lumora_pdo = LumoraDB::pdo();
@@ -400,8 +425,16 @@ final class CoppermineImporter
 
             try {
                 $insert->execute([
-                    $lumora_album_id, $filename, $title, $filesize,
-                    $width, $height, $hits, $approved, $pos, $added_at,
+                    $lumora_album_id,
+                    $filename,
+                    $title,
+                    $filesize,
+                    $width,
+                    $height,
+                    $hits,
+                    $approved,
+                    $pos,
+                    $added_at,
                 ]);
                 $imported++;
             } catch (\Throwable $e) {
@@ -475,8 +508,12 @@ final class CoppermineImporter
 
         // ── Batch-resolve all referenced thumb pids to (aid, filename) ─────
         $pids = [];
-        foreach ($alb_rows as $r) { $pids[] = (int) $r['thumb']; }
-        foreach ($cat_rows  as $r) { $pids[] = (int) $r['thumb']; }
+        foreach ($alb_rows as $r) {
+            $pids[] = (int) $r['thumb'];
+        }
+        foreach ($cat_rows  as $r) {
+            $pids[] = (int) $r['thumb'];
+        }
 
         $picture_info = $this->fetchCpgPictureInfo($pids);
 
@@ -484,7 +521,9 @@ final class CoppermineImporter
         // Maps one CPG thumb pid to its Lumora image_id using the import maps.
         // Returns null and appends a warning string on any lookup failure.
         $resolve_pid = function (int $pid, string $ctx) use (
-            $picture_info, $album_id_map, &$warnings
+            $picture_info,
+            $album_id_map,
+            &$warnings
         ): ?int {
             $info = $picture_info[$pid] ?? null;
             if ($info === null) {
@@ -501,7 +540,7 @@ final class CoppermineImporter
 
             $img_id = LumoraDB::fetchValue(
                 'SELECT `id` FROM `{PREFIX}images`'
-                . ' WHERE `album_id` = ? AND `filename` = ? LIMIT 1',
+                    . ' WHERE `album_id` = ? AND `filename` = ? LIMIT 1',
                 [$lumora_aid, $info['filename']]
             );
 
@@ -797,13 +836,21 @@ final class CoppermineImporter
         $parts[] = $has('filesize') ? '`filesize`'        : '0 AS `filesize`';
 
         // Dimensions
-        if ($has('width'))        { $parts[] = '`width`'; }
-        elseif ($has('pwidth'))   { $parts[] = '`pwidth`  AS `width`'; }
-        else                      { $parts[] = '0 AS `width`'; }
+        if ($has('width')) {
+            $parts[] = '`width`';
+        } elseif ($has('pwidth')) {
+            $parts[] = '`pwidth`  AS `width`';
+        } else {
+            $parts[] = '0 AS `width`';
+        }
 
-        if ($has('height'))       { $parts[] = '`height`'; }
-        elseif ($has('pheight'))  { $parts[] = '`pheight` AS `height`'; }
-        else                      { $parts[] = '0 AS `height`'; }
+        if ($has('height')) {
+            $parts[] = '`height`';
+        } elseif ($has('pheight')) {
+            $parts[] = '`pheight` AS `height`';
+        } else {
+            $parts[] = '0 AS `height`';
+        }
 
         $parts[] = $has('hits')     ? '`hits`'              : '0 AS `hits`';
         $parts[] = $has('approved') ? '`approved`'          : "'YES' AS `approved`";
@@ -812,9 +859,13 @@ final class CoppermineImporter
         $parts[] = $has('caption')  ? '`caption`'           : "'' AS `caption`";
 
         // Timestamp
-        if ($has('added'))        { $parts[] = '`added`'; }
-        elseif ($has('ctime'))    { $parts[] = '`ctime` AS `added`'; }
-        else                      { $parts[] = 'NULL AS `added`'; }
+        if ($has('added')) {
+            $parts[] = '`added`';
+        } elseif ($has('ctime')) {
+            $parts[] = '`ctime` AS `added`';
+        } else {
+            $parts[] = 'NULL AS `added`';
+        }
 
         return implode(', ', $parts);
     }
