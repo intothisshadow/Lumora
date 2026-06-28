@@ -135,7 +135,7 @@ HTML;
             return '';
         }
         return '<small>Powered by '
-            . '<a href="https://coding.unloved-heart.net/scripts/Lumora" rel="noopener">Lumora Gallery</a>'
+            . '<a href="https://coding.unloved-heart.net/scripts/lumora" rel="noopener">Lumora Gallery</a>'
             . '</small>';
     }
 

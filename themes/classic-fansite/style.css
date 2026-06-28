@@ -5,11 +5,11 @@
 
 /* ============================================================
    Lumora Gallery — Classic Fansite Theme
-   fansite.css
+   style.css
 
    All customisation hooks are CSS custom properties in :root.
    To override without editing this file, create custom.css in
-   this folder and link it after fansite.css in template.html:
+   this folder and link it after style.css in template.html:
 
      <link rel="stylesheet" href="{THEME_URL}custom.css">
 

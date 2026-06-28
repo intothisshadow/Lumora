@@ -288,7 +288,7 @@ $content = <<<HTML
 
 <!-- ── Info ──────────────────────────────────────────────────────────────────── -->
 <div class="lum-adm-card">
-  <h5 class="mb-2">ℹ About Updates</h5>
+  <h5 class="mb-2">ℹ️ About Updates</h5>
   <ul class="small text-muted mb-0">
     <li>Update check results are cached locally for 24 hours; use the button above to force a refresh.</li>
     <li>No gallery content, images, or user data is ever transmitted during an update check.</li>
@@ -298,6 +298,8 @@ $content = <<<HTML
         to <code>0</code> in the config table to overwrite them.</li>
     <li>An automatic database backup and <code>config.php</code> backup are created before any file replacement.
         Backups are stored in <code>cache/.updates/backup/</code>.</li>
+    <li>If the <code>install/</code> directory is present when an update completes, it is automatically
+        removed during the cleanup step.</li>
     <li>Cryptographic signature verification is a planned future security enhancement;
         SHA-256 checksum verification is used when the release source provides a checksum.</li>
   </ul>
@@ -628,4 +630,13 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 HTML;
 
-lum_admin_page('Updates', $content, 'updates');
+// Persistent security notice when install/ still exists on disk after update.
+$install_dir_notice = is_dir(LUMORA_ROOT . 'install')
+    ? '<div class="alert alert-warning mb-4">&#x26A0;&#xFE0F; <strong>Security notice:</strong>'
+      . ' The <code>install/</code> directory still exists on this server.'
+      . ' Automatic removal after the last update did not complete — check file permissions.'
+      . ' <strong>Delete it manually via FTP or your hosting file manager</strong> to prevent'
+      . ' unauthorised access to the installation wizard.</div>'
+    : '';
+
+lum_admin_page('Updates', $install_dir_notice . $content, 'updates');

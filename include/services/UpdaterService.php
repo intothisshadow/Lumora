@@ -979,6 +979,34 @@ class UpdaterService
             self::logUpdate('info', "Cleanup after failed update to v{$version}");
         }
 
+        // Auto-remove the install/ directory on a successful upgrade.
+        // The installer already attempts this after a fresh install; doing it here
+        // also catches cases where that step was skipped, or a reinstall left the
+        // directory behind.
+        if ($success) {
+            $installDir = LUMORA_ROOT . 'install';
+            if (is_dir($installDir)) {
+                if (!is_writable($installDir)) {
+                    $details[] = '⚠ install/ is not writable by the web server — delete it manually via FTP';
+                    self::logUpdate('warning', 'install/ directory is not writable; automatic removal skipped (check permissions)');
+                } else {
+                    try {
+                        self::removeDirectory($installDir);
+                        if (!is_dir($installDir)) {
+                            $details[] = '✓ install/ directory removed';
+                            self::logUpdate('info', 'install/ directory removed automatically after upgrade');
+                        } else {
+                            $details[] = '⚠ install/ could not be fully removed (files may be locked or permissions are insufficient) — delete it manually via FTP';
+                            self::logUpdate('warning', 'install/ directory still present after removal attempt — check file permissions');
+                        }
+                    } catch (\Throwable $e) {
+                        $details[] = '⚠ install/ removal failed: ' . $e->getMessage() . ' — delete it manually via FTP';
+                        self::logUpdate('warning', 'install/ directory removal failed: ' . $e->getMessage());
+                    }
+                }
+            }
+        }
+
         // Release the update lock.
         self::releaseLock();
         $details[] = '✓ Update lock released';

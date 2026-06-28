@@ -25,7 +25,7 @@ No Composer required. Upload and go.
    - Step 1: Requirements check + database credentials
    - Step 2: Database setup + admin account creation
    - Step 3: `config.php` written — installation complete
-4. **Delete or protect the `install/` directory** after installation.
+4. **Delete or protect the `install/` directory** after installation. (The installer attempts this automatically; verify it is gone.)
 5. Log in at `admin/` with the credentials you created.
 
 ### Manual install (advanced)
@@ -42,6 +42,7 @@ Lumora/
 │   ├── includes/               Admin-only helpers (flash messages, per-page selector, pagination controls, page renderer)
 │   ├── index.php               Admin entry point — redirects unauthenticated requests to login
 │   ├── account.php             Account management (username, email, password)
+│   ├── users.php               User management (create/edit/delete staff accounts, roles, enable/disable, password reset)
 │   ├── albums.php              Album management
 │   ├── batch.php               Batch-add images from FTP
 │   ├── ajax_batch.php          AJAX endpoint for chunked batch processing
@@ -83,11 +84,13 @@ Lumora/
 │   │   ├── AbstractUpdateProvider.php  Provider interface — fetchMetadata(), buildArchiveUrl(), factory
 │   │   ├── GitHubUpdateProvider.php    GitHub Releases API provider — metadata, SHA-256, archive URL
 │   │   ├── UpdaterService.php  Update orchestrator — 10-stage workflow, lock file, backup, rollback
-│   │   └── InstallationService.php  Installation settings detection, migration helpers, health checks, audit logging
+│   │   ├── InstallationService.php  Installation settings detection, migration helpers, health checks, audit logging
+│   │   └── UserService.php     User CRUD, role constants, permission framework (ROLE_PERMISSIONS, roleHasPermission, currentUserHasPermission)
 │   ├── migrations/             Versioned PHP schema migration classes
 │   │   ├── AbstractMigration.php              Base class — up(), down(), tableExists(), columnExists(), indexExists()
 │   │   ├── Migration0001_CreateMigrationsTable.php  Self-bootstrapping first migration — creates {PREFIX}migrations table
-│   │   └── Migration0002_CreateConfigChangesTable.php  Creates {PREFIX}config_changes audit table for installation setting changes
+│   │   ├── Migration0002_CreateConfigChangesTable.php  Creates {PREFIX}config_changes audit table for installation setting changes
+│   │   └── Migration0003_UpdateUsersTableForRoles.php  Adds is_active column; updates role ENUM to admin/moderator/contributor
 │   ├── bootstrap.php           Load order, constants
 │   ├── db.php                  PDO singleton (LumoraDB)
 │   ├── functions.php           Utility helpers and legacy forwarding wrappers
@@ -110,11 +113,11 @@ Lumora/
 ├── themes/                     Theme folders
 │   ├── default/
 │   │   ├── template.html       Bootstrap 5 base template
-│   │   └── lumora.css          Gallery styles
+│   │   └── style.css           Gallery styles
 │   └── classic-fansite/
 │       ├── template.html       Classic fansite layout (banner, sticky nav, centred panel)
-│       ├── fansite.css         Fully variable-driven styles with fandom colour presets
-│       ├── custom.css          Optional per-site CSS overrides (loaded after fansite.css)
+│       ├── style.css           Fully variable-driven styles with fandom colour presets
+│       ├── custom.css          Optional per-site CSS overrides (loaded after style.css)
 │       └── README.md           Customisation guide + theme creation walkthrough
 ├── ajax_hit.php                Public image view counter endpoint (fire-and-forget POST)
 ├── album.php                   Public album view (pagination, sort, lightbox)
@@ -173,6 +176,7 @@ migration straightforward — point Lumora at the same `albums/` directory and r
 
 ### Admin panel
 - **Dashboard** — stats cards + latest images
+- **Users** — paginated staff account list (10/25/50 per page); create accounts with role selector; edit username, email, and role; reset any account's password (no current-password check); enable/disable accounts; delete accounts; guards prevent self-deletion, self-deactivation, and removal of the last active administrator; migration guard redirects to the Updates page if schema migration hasn't run yet
 - **Categories** — paginated list (25/50/100 per page, session-persisted; item count summary; controls above and below the table); create, edit, delete; nested (parent/child); re-parents children on delete; optional cover image (ID-based, falls back to first image in category's albums)
 - **Albums** — paginated list (25/50/100 per page, session-persisted; item count summary; controls above and below the table; category filter preserved across pages); create, edit, delete; auto-generated folder names or custom; filesystem directory creation; empty folder removed automatically on album delete
 - **Images** — per-album paginated image grid (24/page); search images by filename or title (scoped to an album or across all albums; cross-album results include the category › album path); edit title, sort position, and visibility; optional file replacement via multipart upload (validates type, size, image integrity; regenerates thumbnail and updates dimensions/filesize); single-image delete cleans up disk files and resets album/category cover references; bulk delete and bulk move to another album (up to 500 images per AJAX call); per-image thumbnail regeneration
@@ -260,7 +264,11 @@ migration is a scan-and-index operation — no file conversion needed:
    (e.g. `Xena/Season1/1x01-SinsOfThePast`).
 3. Run **Batch Add** on each album — Lumora indexes the images without touching the files.
 
-The **Coppermine Importer** plugin (`plugins/coppermine-importer/`) automates this entirely — it connects to the Coppermine database directly and imports categories, albums, and image metadata in keyset-paginated AJAX chunks without touching any files. Navigate to **Admin → Import** to run it. Starting with plugin v1.1.0, album and category cover-thumbnail selections are preserved automatically as part of the import wizard itself. The **Metadata Sync** tool (`Admin → Import → Metadata Sync`) remains available as a fallback for re-applying cover assignments after a stopped import or for galleries imported before v1.1.0.
+The **Coppermine Importer** plugin (`plugins/coppermine-importer/`) automates this entirely — it connects to the Coppermine database directly and imports categories, albums, and image metadata in keyset-paginated AJAX chunks without touching any files. Navigate to **Admin → Import** to run it.
+
+- **Plugin v1.2.0+** — the credentials form includes an **Auto-Detect** panel: supply the filesystem path to your Coppermine installation and the importer reads `include/config.inc.php` to fill in all five database fields automatically. If multiple Coppermine installations are found under the supplied path, a selection list is shown.
+- **Plugin v1.1.0+** — album and category cover-thumbnail selections are preserved automatically as part of the import wizard itself.
+- The **Metadata Sync** tool (`Admin → Import → Metadata Sync`) remains available as a fallback for re-applying cover assignments after a stopped import or for galleries imported before v1.1.0.
 
 ---
 
@@ -268,7 +276,7 @@ The **Coppermine Importer** plugin (`plugins/coppermine-importer/`) automates th
 
 - `config.php` contains database credentials — ensure your web server does not serve it as plain text. Adding an `.htaccess` rule to deny direct access is recommended.
 - **Unique table prefix** — the installer auto-generates a random `lum_XXXXXXXX_` prefix for every new installation, making database table names harder to guess in shared-database environments. Advanced users can override the prefix during installation. Existing installations using `lum_` or any other prefix are entirely unaffected.
-- The `install/` directory should be **deleted or access-restricted** after installation.
+- The `install/` directory is automatically removed by the installer after a successful fresh install, and by the built-in updater after a successful upgrade. Verify it is gone after either operation; if not, delete it manually via FTP or your hosting control panel.
 - All POST actions use CSRF tokens. Admin routes require an authenticated session.
 - **Login rate limiting** — the admin login page tracks failed attempts per IP address in `cache/.login_ratelimit.json`. After 5 failures within a 15-minute window the form is locked, a 2-second server-side delay is enforced, and a lockout message is shown. Individual failures each add a 1-second delay. The IP record is cleared after a successful login.
 - Passwords are hashed with `password_hash()` / `PASSWORD_DEFAULT`.
@@ -287,7 +295,7 @@ The **Coppermine Importer** plugin (`plugins/coppermine-importer/`) automates th
 | | |
 |---|---|
 | Developer | Ariane |
-| Repository | <https://coding.unloved-heart.net/scripts/Lumora> |
+| Repository | <https://coding.unloved-heart.net/scripts/lumora> |
 
 ---
 

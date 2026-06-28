@@ -17,7 +17,7 @@ declare(strict_types=1);
  *   7. Service classes: LumoraConfig, GalleryService, ThumbnailService, ThemeRenderer,
  *                       MigrationService, UpdateService, SchemaService,
  *                       AbstractUpdateProvider, GitHubUpdateProvider, UpdaterService,
- *                       InstallationService
+ *                       InstallationService, UserService
  *   8. functions.php  (utility helpers + legacy forwarding wrappers)
  *   9. auth.php
  *  10. thumb.php     (legacy forwarding wrappers → ThumbnailService)
@@ -106,6 +106,7 @@ require_once LUMORA_INCLUDE . 'services/AbstractUpdateProvider.php';
 require_once LUMORA_INCLUDE . 'services/GitHubUpdateProvider.php';
 require_once LUMORA_INCLUDE . 'services/UpdaterService.php';
 require_once LUMORA_INCLUDE . 'services/InstallationService.php';
+require_once LUMORA_INCLUDE . 'services/UserService.php';
 
 // ── 8–11. Legacy includes (wrappers + utilities) ─────────────────────────────
 require_once LUMORA_INCLUDE . 'functions.php';

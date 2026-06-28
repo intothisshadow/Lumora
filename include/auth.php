@@ -3,7 +3,10 @@ declare(strict_types=1);
 /**
  * Lumora Gallery — Authentication
  *
- * Single-admin for V1; schema supports additional users/roles for future expansion.
+ * Multi-user authentication with roles: admin, moderator, contributor.
+ * Admin panel access still requires the 'admin' role; role-gated access for
+ * moderators and contributors is enabled per-page as those roles gain panel
+ * access in future phases.
  * Sessions are started by bootstrap.php before these functions are called.
  *
  * Persistent "Remember Me" uses a split-token scheme:
@@ -59,6 +62,13 @@ function lumora_login(string $username, string $password, bool $remember = false
     );
 
     if (!$user || !password_verify($password, $user['password_hash'])) {
+        return null;
+    }
+
+    // Reject disabled accounts (is_active column added in DB version 9).
+    // The isset() guard keeps this safe on pre-v9 installs where the column
+    // does not yet exist and SELECT * returns no is_active key.
+    if (isset($user['is_active']) && !(bool) $user['is_active']) {
         return null;
     }
 
@@ -151,6 +161,18 @@ function lumora_require_admin(): void
             lumora_base_url() . 'admin/login.php?redirect=' . urlencode($_SERVER['REQUEST_URI'] ?? '')
         );
     }
+}
+
+// ── Permission check ────────────────────────────────────────────────────────────
+
+/**
+ * Return true when the currently logged-in user has the named permission.
+ * Permission constants and role→permission mapping live in UserService.
+ * Returns false when no user is logged in.
+ */
+function lumora_has_permission(string $permission): bool
+{
+    return UserService::currentUserHasPermission($permission);
 }
 
 // ── CSRF ──────────────────────────────────────────────────────────────────────
@@ -298,7 +320,7 @@ function lumora_check_remember_cookie(): bool
         [(int) $token['user_id']]
     );
 
-    if (!$user || $user['role'] !== 'admin') {
+    if (!$user || $user['role'] !== 'admin' || (isset($user['is_active']) && !(bool) $user['is_active'])) {
         try { LumoraDB::delete('remember_tokens', 'selector = ?', [$selector]); } catch (\Throwable) {}
         lumora_clear_remember_cookie();
         return false;

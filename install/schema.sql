@@ -1,5 +1,5 @@
 -- Lumora Gallery — Database Schema
--- Version: 8
+-- Version: 9
 -- Requires: MySQL 5.7+ / MariaDB 10.3+
 -- Charset: utf8mb4 / utf8mb4_unicode_ci
 --
@@ -7,7 +7,7 @@
 --
 -- Tables:
 --   {PREFIX}config                  — gallery-wide key/value settings
---   {PREFIX}users                   — admin account (V1 single-user, expandable)
+--   {PREFIX}users                   — staff accounts with role-based access (DB version 9)
 --   {PREFIX}categories              — nested category tree (parent_id = 0 for root)
 --   {PREFIX}albums                  — albums; each maps to a sub-folder of albums/
 --   {PREFIX}images                  — individual images with dimensions and view counter
@@ -18,6 +18,22 @@
 --   {PREFIX}migration_log           — import event log written by importer plugins (DB version 6)
 --   {PREFIX}password_reset_tokens   — single-use admin password-reset tokens (DB version 7)
 --   {PREFIX}config_changes          — configuration change audit log (DB version 8)
+--
+-- Migration from DB version 8:
+--   Run Migration0003_UpdateUsersTableForRoles via Admin → Updates → Run Database Update,
+--   or apply the following statements manually (replace `lum_` with your actual prefix):
+--
+--     ALTER TABLE `lum_users`
+--       ADD COLUMN `is_active` tinyint UNSIGNED NOT NULL DEFAULT 1
+--         COMMENT '1 = active, 0 = disabled'
+--       AFTER `email`;
+--
+--     UPDATE `lum_users` SET `role` = 'moderator'   WHERE `role` = 'editor';
+--     UPDATE `lum_users` SET `role` = 'contributor' WHERE `role` = 'viewer';
+--
+--     ALTER TABLE `lum_users`
+--       MODIFY COLUMN `role`
+--         enum('admin','moderator','contributor') NOT NULL DEFAULT 'contributor';
 --
 -- Migration from DB version 7:
 --   Run the CREATE TABLE statement for {PREFIX}config_changes below
@@ -92,14 +108,20 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}config` (
   COMMENT='Gallery configuration key/value store';
 
 -- ──────────────────────────────────────────────────────────────────────────────
--- users
+-- users  (updated DB version 9: is_active column, updated role ENUM)
+-- ──────────────────────────────────────────────────────────────────────────────
+-- role:      'admin' = full access, 'moderator' = content management,
+--            'contributor' = upload/own-content only.
+-- is_active: 1 = enabled (default), 0 = disabled. Disabled accounts cannot log
+--            in. The last active administrator cannot be deactivated or deleted.
 -- ──────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `{PREFIX}users` (
   `id`            int UNSIGNED     NOT NULL AUTO_INCREMENT,
   `username`      varchar(50)      NOT NULL,
   `password_hash` varchar(255)     NOT NULL,
   `email`         varchar(255)     NOT NULL DEFAULT '',
-  `role`          enum('admin','editor','viewer') NOT NULL DEFAULT 'viewer',
+  `role`          enum('admin','moderator','contributor') NOT NULL DEFAULT 'contributor',
+  `is_active`     tinyint UNSIGNED NOT NULL DEFAULT 1 COMMENT '1 = active, 0 = disabled',
   `last_login`    datetime         DEFAULT NULL,
   `created_at`    datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -107,7 +129,7 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}users` (
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
-  COMMENT='User accounts';
+  COMMENT='Staff accounts with role-based access (DB version 9)';
 
 -- ──────────────────────────────────────────────────────────────────────────────
 -- categories
@@ -348,4 +370,3 @@ CREATE TABLE IF NOT EXISTS `{PREFIX}config_changes` (
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Configuration change audit log (DB version 8)';
-

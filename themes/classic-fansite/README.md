@@ -11,7 +11,7 @@ the gallery sites of the 2000s–2010s fandom era.
 | File | Purpose |
 |---|---|
 | `template.html` | Page structure — banner, sticky nav, content area, footer |
-| `fansite.css` | All styles; every design decision is a CSS custom property |
+| `style.css` | All styles; every design decision is a CSS custom property |
 | `README.md` | This file |
 
 ---
@@ -19,9 +19,9 @@ the gallery sites of the 2000s–2010s fandom era.
 ## Quick-start customisation
 
 All colours, sizes, and fonts are controlled by CSS custom properties in the `:root`
-block at the top of `fansite.css`. **Do not edit `fansite.css` directly** — create a
+block at the top of `style.css`. **Do not edit `style.css` directly** — create a
 file called `custom.css` in this folder and override only the variables you want.
-Then add one line to `template.html` after the existing `fansite.css` link:
+Then add one line to `template.html` after the existing `style.css` link:
 
 ```html
 <link rel="stylesheet" href="{THEME_URL}custom.css">
@@ -138,13 +138,13 @@ The banner area displays the gallery name over a CSS gradient by default. To rep
 the gradient with a custom image:
 
 1. **Upload your banner** into the theme folder or anywhere inside the gallery
-   (e.g. `themes/classic-fansite/banner.jpg`).
+   (e.g. `themes/classic-fansite/images/banner.jpg`).
 
 2. **Create a custom header HTML file**, for example
    `themes/classic-fansite/header.html`, containing a single image tag:
 
    ```html
-   <img src="/your-gallery-path/themes/classic-fansite/banner.jpg" alt="">
+   <img src="/your-gallery-path/themes/classic-fansite/images/banner.jpg" alt="">
    ```
 
    Adjust the `src` path to match your gallery's public URL. No surrounding `<div>`
@@ -183,7 +183,7 @@ If your banner image already contains the gallery name, you can hide the HTML ti
 The easiest way to make a fully custom theme is to copy this folder:
 
 1. **Copy** `themes/classic-fansite/` and rename it (e.g. `themes/my-fandom/`).
-2. **Edit `fansite.css`** in the copy — or create `custom.css` — and set your
+2. **Edit `style.css`** in the copy — or create `custom.css` — and set your
    colour variables.
 3. **Replace the banner image** (optional).
 4. In **Admin → Config → Theme**, select your new theme name.
@@ -204,7 +204,7 @@ The template engine discovers any folder inside `themes/` that contains a
 
 You can identify your theme by adding a CSS header comment to the very top of
 its primary stylesheet — the first `{THEME_URL}*.css` link in `template.html`
-(for this theme, that's `fansite.css` itself, even if you override values via
+(for this theme, that's `style.css` itself, even if you override values via
 `custom.css`):
 
 ```css
@@ -251,7 +251,7 @@ own nav directly in `template.html` using `{BASE_URL}`. Both approaches are vali
 themes/
 └── classic-fansite/
     ├── template.html   — page structure (banner, nav, content, footer)
-    ├── fansite.css     — styles and customisation variables
+    ├── style.css       — styles and customisation variables
     ├── custom.css      — (optional) your overrides; not shipped by default
     ├── header.html     — (optional) custom banner image tag
     └── README.md       — this file

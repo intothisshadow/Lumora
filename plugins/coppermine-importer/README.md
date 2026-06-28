@@ -3,7 +3,7 @@
 An official Lumora Gallery plugin that migrates categories, albums, and image
 metadata from Coppermine Gallery (CPG 1.4–1.6) to Lumora.
 
-**Plugin version:** 1.1.0  
+**Plugin version:** 1.3.0  
 **Requires Lumora:** 1.5.0+  
 **License:** GPL-3.0-or-later
 

@@ -9,6 +9,10 @@ declare(strict_types=1);
  * installation into an already-imported Lumora gallery, without requiring a
  * full re-import.
  *
+ * The credentials form includes an auto-detect panel that reads the
+ * Coppermine include/config.inc.php file from a supplied filesystem path,
+ * the same as the main import wizard.
+ *
  * Matching strategy (the original importer does not persist Coppermine
  * record IDs into Lumora):
  *   - Albums:     matched by `folder`, resolved the same way importAlbums()
@@ -36,6 +40,7 @@ require_once $_lumora_root . '/include/bootstrap.php';
 require_once $_lumora_root . '/admin/includes/admin_helpers.php';
 require_once dirname(__DIR__) . '/version.php';
 require_once dirname(__DIR__) . '/CoppermineImporter.php';
+require_once dirname(__DIR__) . '/CoppermineConfigDetector.php';
 
 lumora_require_admin();
 
@@ -186,12 +191,41 @@ if ($step === 1) {
 
     $csrf_h = h($csrf);
 
+    // Detection panel variables (pre-computed for safe JS embedding)
+    $detect_url_js    = json_encode($plugin_url . 'ajax_detect_config.php');
+    $csrf_js          = json_encode($csrf);
+    $last_detect_path = h((string) ($_SESSION['lumora_cpg_last_detect_path'] ?? ''));
+
     echo '<p class="text-muted">Sync category and album cover-thumbnail selections from your '
         . 'Coppermine database into this already-imported Lumora gallery. This does <strong>not</strong> '
         . 'import categories, albums, or images &mdash; use the '
         . '<a href="' . h($plugin_url . 'index.php') . '">main Coppermine Importer</a> for that. '
         . 'Run this any time after an import to fill in cover images that were not carried over.</p>';
 
+    // ── Auto-detect panel ─────────────────────────────────────────────────────
+    echo '<div class="card mb-3" style="max-width:600px;">';
+    echo '<div class="card-header d-flex align-items-center gap-2">';
+    echo '&#128270; Auto-Detect from Coppermine Installation';
+    echo '<span class="badge bg-secondary ms-1 small fw-normal">Optional</span>';
+    echo '</div>';
+    echo '<div class="card-body">';
+    echo '<p class="text-muted small mb-2">'
+        . 'Enter the filesystem path to your Coppermine installation to automatically '
+        . 'populate the database credentials below. The <code>include/config.inc.php</code> '
+        . 'file is read as text &mdash; no Coppermine PHP code is executed.'
+        . '</p>';
+    echo '<div class="input-group mb-2">';
+    echo '<input type="text" id="cpg-detect-path" class="form-control font-monospace"'
+        . ' placeholder="/var/www/html/gallery"'
+        . ' value="' . $last_detect_path . '"'
+        . ' autocomplete="off" spellcheck="false">';
+    echo '<button type="button" id="cpg-detect-btn" class="btn btn-outline-primary">Detect Settings</button>';
+    echo '</div>';
+    echo '<div id="cpg-detect-status" class="small text-muted">Enter a path above and click Detect to auto-fill the form below.</div>';
+    echo '<div id="cpg-detect-multi" style="display:none;" class="mt-2"></div>';
+    echo '</div></div>';
+
+    // ── Credentials form ──────────────────────────────────────────────────────
     echo '<div class="card" style="max-width:600px;">';
     echo '<div class="card-header">Coppermine Database Credentials</div>';
     echo '<div class="card-body">';
@@ -227,6 +261,146 @@ if ($step === 1) {
         . '</div>';
     echo '</form>';
     echo '</div></div>';
+
+    // ── Detection JS ──────────────────────────────────────────────────────────
+    echo '<script>' . "\n";
+    echo 'var CPG_DETECT_URL = ' . $detect_url_js . ';' . "\n";
+    echo 'var CPG_CSRF       = ' . $csrf_js . ';' . "\n";
+    echo <<<'DETECTJS'
+(function () {
+  var pathInput  = document.getElementById('cpg-detect-path');
+  var detectBtn  = document.getElementById('cpg-detect-btn');
+  var statusEl   = document.getElementById('cpg-detect-status');
+  var multiEl    = document.getElementById('cpg-detect-multi');
+
+  var fHost   = document.getElementById('db_host');
+  var fName   = document.getElementById('db_name');
+  var fUser   = document.getElementById('db_user');
+  var fPass   = document.getElementById('db_pass');
+  var fPrefix = document.getElementById('db_prefix');
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function setStatus(msg, type) {
+    statusEl.innerHTML = msg;
+    statusEl.className = 'small text-' + (type || 'muted');
+  }
+
+  function populateForm(config) {
+    fHost.value   = config.dbserver    || '';
+    fName.value   = config.dbname      || '';
+    fUser.value   = config.dbuser      || '';
+    fPass.value   = config.dbpass      || '';
+    fPrefix.value = config.TABLE_PREFIX || '';
+    multiEl.style.display = 'none';
+    setStatus(
+      '\u2713 Settings detected and populated. Review the fields below, then click \u201cTest Connection\u201d.',
+      'success'
+    );
+  }
+
+  function showMultiple(installations) {
+    var html = '<p class="fw-semibold small mb-2 text-warning">'
+             + '\u26a0 Multiple Coppermine installations found. Select one to use:</p>'
+             + '<div class="list-group mb-2">';
+    installations.forEach(function (inst) {
+      var disabled = (inst.dbname === '(could not parse)') ? ' disabled' : '';
+      html += '<label class="list-group-item list-group-item-action small py-2'
+            + (disabled ? ' text-muted' : '') + '">'
+            + '<input type="radio" name="cpg-inst-sel" value="' + escHtml(String(inst.index)) + '"'
+            + ' class="form-check-input me-2"' + disabled + '>'
+            + '<code class="me-1">' + escHtml(inst.rel_path) + '</code>'
+            + '<span class="text-muted">'
+            + escHtml(inst.dbname) + (inst.dbserver ? ' @ ' + escHtml(inst.dbserver) : '')
+            + '</span>'
+            + '</label>';
+    });
+    html += '</div>'
+          + '<button type="button" id="cpg-use-sel-btn" class="btn btn-sm btn-outline-primary">'
+          + 'Use Selected Installation</button>';
+
+    multiEl.innerHTML     = html;
+    multiEl.style.display = '';
+
+    document.getElementById('cpg-use-sel-btn').addEventListener('click', function () {
+      var sel = document.querySelector('input[name="cpg-inst-sel"]:checked');
+      if (!sel) {
+        setStatus('Please select an installation from the list.', 'warning');
+        return;
+      }
+      doSelect(parseInt(sel.value, 10));
+    });
+  }
+
+  function doAjax(body, onSuccess) {
+    detectBtn.disabled = true;
+    var xhr  = new XMLHttpRequest();
+    xhr.open('POST', CPG_DETECT_URL, true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.timeout   = 30000;
+    xhr.ontimeout = function () {
+      setStatus('Detection request timed out. Check that the server can access the supplied path.', 'danger');
+      detectBtn.disabled = false;
+    };
+    xhr.onerror = function () {
+      setStatus('Detection request failed. Check server connectivity.', 'danger');
+      detectBtn.disabled = false;
+    };
+    xhr.onload = function () {
+      detectBtn.disabled = false;
+      var data;
+      try { data = JSON.parse(xhr.responseText); }
+      catch (e) { setStatus('Detection failed (HTTP ' + xhr.status + ').', 'danger'); return; }
+      if (!data.ok) {
+        setStatus('\u2717 ' + escHtml(data.error || 'Detection failed.'), 'danger');
+        return;
+      }
+      onSuccess(data);
+    };
+    xhr.send(body);
+  }
+
+  function doDetect() {
+    var path = pathInput.value.trim();
+    if (!path) { setStatus('Please enter a filesystem path.', 'warning'); return; }
+    setStatus('Searching\u2026', 'muted');
+    multiEl.style.display = 'none';
+    var body = 'action=find'
+             + '&csrf_token=' + encodeURIComponent(CPG_CSRF)
+             + '&cpg_path='   + encodeURIComponent(path);
+    doAjax(body, function (data) {
+      if (data.multiple) {
+        showMultiple(data.installations);
+        setStatus('Select an installation from the list below.', 'muted');
+      } else {
+        populateForm(data.config);
+      }
+    });
+  }
+
+  function doSelect(idx) {
+    setStatus('Loading\u2026', 'muted');
+    var body = 'action=select'
+             + '&csrf_token='   + encodeURIComponent(CPG_CSRF)
+             + '&select_index=' + encodeURIComponent(idx);
+    doAjax(body, function (data) {
+      populateForm(data.config);
+    });
+  }
+
+  detectBtn.addEventListener('click', doDetect);
+  pathInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); doDetect(); }
+  });
+})();
+DETECTJS;
+    echo '</script>' . "\n";
 
     // ── Step 2: Preview & Apply ───────────────────────────────────────────────────
 } elseif ($step === 2) {

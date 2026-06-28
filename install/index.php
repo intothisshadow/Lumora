@@ -267,11 +267,21 @@ function ins_requirements_passed(array $checks): bool
  * Attempt to delete the installer directory and all its contents.
  * Called automatically at the end of a successful installation.
  *
- * Deletes all files inside first, then removes the (now empty) directory.
- * On Unix/Linux, deleting the currently-running PHP file from within that same
- * script is safe because the process already holds an open file descriptor.
+ * Strategy:
+ *   1. chmod each file to 0666 then unlink — handles cases where the file
+ *      exists but has restrictive permissions the PHP process can change.
+ *   2. rmdir the (now hopefully empty) directory.
+ *   3. If the directory still exists (FTP-ownership mismatch, locked file,
+ *      etc.), overwrite install/index.php with a redirect to the gallery
+ *      root — this neutralises the reinstallation risk even when PHP cannot
+ *      remove the file itself.
  *
- * @return bool True if the directory was fully removed; false otherwise.
+ * On Unix/Linux, unlinking the currently-running PHP file is safe because the
+ * process holds an open file descriptor to the inode; the directory entry is
+ * removed but execution continues normally.
+ *
+ * @return bool True when the directory was fully removed; false when it
+ *              survived but has been neutralised via redirect overwrite.
  */
 function ins_delete_installer(): bool
 {
@@ -280,19 +290,38 @@ function ins_delete_installer(): bool
         return true; // already absent
     }
 
-    // Delete every file inside (install/ contains no subdirectories).
-    $files = glob($dir . DIRECTORY_SEPARATOR . '*');
-    if ($files === false) {
-        return false;
-    }
-    foreach ($files as $file) {
-        if (is_file($file) && !unlink($file)) {
-            return false;
+    // Pass 1 — attempt to delete every file (hidden files included).
+    $patterns = [$dir . DIRECTORY_SEPARATOR . '*', $dir . DIRECTORY_SEPARATOR . '.*'];
+    foreach ($patterns as $pattern) {
+        foreach (glob($pattern) ?: [] as $file) {
+            if (is_file($file)) {
+                @chmod($file, 0666);
+                @unlink($file);
+            }
         }
     }
 
-    // Remove the now-empty directory.
-    return rmdir($dir);
+    // Pass 2 — remove the (now hopefully empty) directory.
+    @chmod($dir, 0755);
+    @rmdir($dir);
+
+    if (!is_dir($dir)) {
+        return true; // fully removed
+    }
+
+    // Directory survived — file ownership differs from the PHP process user.
+    // Security fallback: overwrite index.php with a redirect so the installer
+    // is inaccessible even though the directory still exists on disk.
+    // Visiting install/ will now redirect to the gallery root instead of
+    // serving the installation wizard.
+    $idx = $dir . DIRECTORY_SEPARATOR . 'index.php';
+    @file_put_contents(
+        $idx,
+        '<?php /* Lumora installer neutralised after installation. */' . "\n"
+        . 'header(\'Location: ../\'); exit;' . "\n"
+    );
+
+    return false; // directory persists; admin should remove it via FTP
 }
 
 // ── Session ───────────────────────────────────────────────────────────────────
@@ -677,8 +706,10 @@ HTML;
     // Computed before the heredoc so PHP can interpolate {$install_status_html}.
     $install_status_html = $install_deleted
         ? '<div class="alert alert-success py-2 small mt-2">&#10003; The <code>install/</code> directory was automatically removed.</div>'
-        : '<div class="alert alert-warning py-2 small mt-2">&#9888; The <code>install/</code> directory could not be removed automatically. '
-          . 'Please delete it manually via FTP or your hosting control panel.</div>';
+        : '<div class="alert alert-warning py-2 small mt-2">&#9888; The <code>install/</code> directory could not be deleted automatically'
+          . ' (the web server does not own the files — common when uploaded via FTP).'
+          . ' The installer entry point has been <strong>neutralised</strong> and will redirect to your gallery if visited,'
+          . ' but <strong>please also delete the <code>install/</code> directory via FTP</strong> or your hosting file manager.</div>';
 
     $body = <<<HTML
 <div class="alert alert-success">

@@ -8,13 +8,272 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 
+## [Unreleased]
+
+---
+
+## [1.9.1] — 2026-06-28
+
+### Fixed
+
+- **Bug #1 — Select All checkbox in Image Manager** (`admin/images.php`):
+  The "Select All" button did nothing. Root cause: all three attempts relied on
+  JavaScript event listeners registered after the fact (`addEventListener`,
+  `DOMContentLoaded`). If anything prevented the listener from being attached
+  (script timing, a silent error, or a browser quirk), the click handler would
+  simply not exist. Fix: removed all event-listener registration and rewrote the
+  entire interactive layer as globally-defined functions (`lumSelAll`,
+  `lumUpdCount`, `lumBulkDelete`, `lumBulkMove`, `lumSingleDelete`,
+  `lumRethumb`) invoked directly via `onclick`/`onchange` attributes on the
+  buttons and checkboxes. Global functions defined in a `<script>` block are
+  unconditionally available to inline handlers by the time the user can click
+  anything, eliminating all timing dependencies.
+
+  A secondary bug caused the `<script>` block to fail silently: a `\n` escape
+  sequence inside a PHP heredoc is a literal newline (same as in double-quoted
+  strings). The `confirm()` call in `lumBulkDelete` contained `'...files?\n\nThis
+  cannot be undone.'`, which PHP rendered as two real newline characters inside
+  a JavaScript single-quoted string — an unconditional `SyntaxError` that
+  prevented the entire script block from parsing, so no global functions were
+  ever defined. Fixed by doubling the backslash (`\\n`) so PHP outputs the
+  two-character sequence `\n` that JavaScript interprets as an escape.
+
+  A third bug was also fixed: the per-row delete confirmation message was
+  passed via `json_encode()` into a double-quoted HTML `onclick` attribute.
+  `json_encode()` wraps its output in double quotes, which terminated the
+  HTML attribute prematurely. Fixed by storing the message in a
+  `data-confirm` attribute (HTML-escaped with `h()`) and reading it back
+  via `this.dataset.confirm` in the onclick handler.
+
+- **Bug #2 — Auto-delete install/ directory** (`install/index.php`,
+  `include/services/UpdaterService.php`, `admin/update.php`):
+  The installer's `ins_delete_installer()` returned `false` immediately on the
+  first `unlink()` failure (common on Windows, or when FTP-uploaded files are
+  owned by a different user than the PHP process). Files beyond the first were
+  never attempted and the directory was left intact.
+
+  Fix: (1) `@chmod($file, 0666)` is called before each `@unlink()` to handle
+  cases where the PHP process owns the files but they have restrictive
+  permissions; (2) all files are attempted regardless of individual failures;
+  (3) if the directory still exists after deletion attempts, `index.php` is
+  overwritten with a one-line PHP redirect (`header('Location: ../'); exit`).
+  This neutralises the reinstallation risk even when the web server cannot
+  delete FTP-owned files — visiting `install/` will redirect to the gallery
+  root instead of serving the wizard. The completion page message was updated
+  to explain this fallback to the user.
+
+  The updater's `stageCleanup()` also pre-checks `is_writable()` and provides
+  a specific failure reason in the log. A persistent security notice on every
+  admin page (already present in `admin_helpers.php`) and on the Updates page
+  (`admin/update.php`) continues to prompt manual removal if the directory
+  survives.
+
+- **Bug #3 — ℹ icon in update.php** (`admin/update.php`):
+  Replaced the plain Unicode text character `ℹ` (U+2139) in the "About Updates"
+  section heading with `ℹ️` (U+2139 + U+FE0F variation selector), which renders
+  as a colour emoji matching the style of all other section headings on the page
+  (`⬆`, `🗄`, `🔄`, `📋`).
+
+### Changed
+
+- **Theme CSS standardised to `style.css`** (`themes/default/`, `themes/classic-fansite/`):
+  Renamed `lumora.css` → `style.css` in the default theme and `fansite.css` → `style.css`
+  in the classic-fansite theme. Both `template.html` files updated to reference
+  `style.css`. Internal block-comment filename annotations in both CSS files updated.
+  `custom.css` in classic-fansite is unchanged.
+  `themes/classic-fansite/README.md` and the root `README.md` updated to reflect the
+  new filenames throughout. `lumora_theme_primary_stylesheet()` requires no change as
+  it discovers the primary stylesheet dynamically from `template.html`.
+
+
+
+---
+
 ## [1.9.0] — 2026-06-25
+
+**Staff Account Management — User Management UI** 
+
+  **`UserService`** (`include/services/UserService.php`) — new static service class
+  loaded by bootstrap.php. Responsibilities:
+
+  - Role constants (`ROLES`, `ROLE_LABELS`) and the permission framework
+    (`ROLE_PERMISSIONS`, `roleHasPermission()`, `getRolePermissions()`,
+    `currentUserHasPermission()`) providing the foundation for per-page role
+    gates as non-admin roles gain admin panel access in future phases.
+  - `createUser()` — validates username/password/email/role, enforces uniqueness,
+    hashes password with `PASSWORD_BCRYPT` cost 12.
+  - `updateUser()` — updates username, email, and/or role with full validation.
+  - `resetPassword()` — admin-initiated password reset (no current-password check);
+    revokes all remember-me tokens to force a fresh login on all devices.
+  - `setActive()` — enables or disables an account; guards against deactivating
+    the last active administrator.
+  - `deleteUser()` — permanently deletes an account; guards against self-deletion
+    and deleting the last administrator; clears remember-me and reset tokens first.
+  - `getPaginatedUsers()` / `countUsers()` — sorted by role priority then username.
+  - `getUser()` — fetch a single user row by ID.
+  - `roleBadge()` / `roleOptions()` — Bootstrap badge HTML and `<option>` list
+    helpers used by the admin page.
+
+  **`admin/users.php`** — new admin page accessible at **Admin → Users**.
+  Three views served from a single file:
+  - **User list** (default): paginated table (10/25/50 per page, session-persisted)
+    showing ID, username, role badge, email, active/disabled status badge, last
+    login, and per-row Edit / Enable–Disable / Delete actions. A **“+ New User”**
+    button and per-page selector sit above the table. Confirm dialog for delete.
+    Disabled rows show a secondary badge. “You” badge marks the current admin's
+    own row; their Enable/Disable and Delete buttons are disabled client-side and
+    rejected server-side.
+  - **Create user** (`?action=new`): username, optional email, role selector with
+    live role-description text, password + confirm fields with live match indicator.
+    Role reference card beside the form explains each role's permissions.
+  - **Edit user** (`?action=edit&id=N`): profile form (username, email, role —
+    role selector disabled when editing own account); account info summary (status,
+    role badge, last login, member since); reset-password sub-form (no current
+    password required); Enable/Disable toggle and Delete button (both disabled
+    when editing own account).
+    All POST actions validate CSRF. Redirects keep the user on the correct view
+    after success or failure.
+    A migration guard checks `Migration0003_UpdateUsersTableForRoles` and shows a
+    friendly prompt linking to the Updates page if the migration hasn't run yet.
+
+  **`Migration0003_UpdateUsersTableForRoles`**
+  (`include/migrations/Migration0003_UpdateUsersTableForRoles.php`):
+  - `up()`: adds `is_active tinyint UNSIGNED NOT NULL DEFAULT 1` to `{PREFIX}users`
+    after the `email` column; migrates legacy `'editor'` → `'moderator'` and
+    `'viewer'` → `'contributor'` before modifying the ENUM; updates the `role`
+    ENUM to `('admin','moderator','contributor')` with default `'contributor'`.
+  - `down()`: reverses the ENUM, renames roles back, drops `is_active`.
+  - `tableExists()` / `columnExists()` guards make both directions idempotent.
+
+  **`admin/includes/admin_helpers.php`** — **Users** (👥) nav item added between
+  Dashboard and Batch Add.
+
+  **`include/auth.php`** — three changes:
+  - Header comment updated to reflect multi-user role support.
+  - `lumora_login()`: rejects disabled accounts — returns null when
+    `is_active = 0`. The `isset()` guard keeps the check safe on pre-v9 installs
+    where `SELECT *` returns no `is_active` key.
+  - `lumora_check_remember_cookie()`: also rejects disabled accounts in the user
+    row check `($user['role'] !== 'admin' || disabled account)`.
+  - New `lumora_has_permission(string $permission): bool` — delegates to
+    `UserService::currentUserHasPermission()`; provides the public API for
+    future per-page permission gates.
+
+  **`include/bootstrap.php`** — `UserService.php` added to the step 7 service
+  class load sequence; header comment updated.
+
+  **`install/schema.sql`** (DB version 9) — `{PREFIX}users` table updated with
+  `is_active` column and the new role ENUM. Migration comment for v8 → v9
+  added at the top. Version header bumped to 9.
+
+  **`version.php`** — `LUMORA_DB_VERSION` bumped from 8 to 9.
+
+  **Roles and permissions defined:**
+
+  | Role | Label | Permissions |
+  |------|-------|-------------|
+  | `admin` | Administrator | site_configuration, user_management, manage_albums, manage_images, moderate_comments, maintenance_tools, batch_add, view_updates |
+  | `moderator` | Moderator | manage_albums, manage_images, moderate_comments, maintenance_tools |
+  | `contributor` | Contributor | batch_add, edit_own_images, manage_assigned_albums |
+
+  Page-level permission enforcement for moderator and contributor roles
+  (restricting access to their respective admin pages) is the next phase of
+  this feature.
+
+  **Schema migration (DB v8 → v9):**
+  ```sql
+  -- Run via Admin → Updates → Run Database Update, or manually:
+  ALTER TABLE `lum_users`
+    ADD COLUMN `is_active` tinyint UNSIGNED NOT NULL DEFAULT 1
+      COMMENT '1 = active, 0 = disabled'
+    AFTER `email`;
+  
+  UPDATE `lum_users` SET `role` = 'moderator'   WHERE `role` = 'editor';
+  UPDATE `lum_users` SET `role` = 'contributor' WHERE `role` = 'viewer';
+  
+  ALTER TABLE `lum_users`
+    MODIFY COLUMN `role`
+      enum('admin','moderator','contributor') NOT NULL DEFAULT 'contributor';
+  ```
+  Replace `lum_` with your actual table prefix. Existing installations already
+  running with only an `admin`-role account (the installer default) are
+  completely unaffected by the role migration UPDATEs, which are no-ops.
+
+- **Auto-delete `install/` directory after successful upgrade**
+  (`include/services/UpdaterService.php`):
+  `stageCleanup()` now automatically removes the `install/` directory when an
+  upgrade completes successfully.  Uses the existing `removeDirectory()` helper;
+  a success or failure detail line is added to the cleanup stage log so
+  administrators can see the outcome in the progress UI.  A warning is logged
+  if removal fails (e.g. restrictive filesystem permissions), and the existing
+  per-page security banner in `admin_helpers.php` remains visible until the
+  directory is gone.  Completes TODO item 1.
+
+- **Coppermine Importer — Auto-detect database settings** (`plugins/coppermine-importer/CoppermineConfigDetector.php`,
+  `plugins/coppermine-importer/admin/ajax_detect_config.php`,
+  `plugins/coppermine-importer/admin/index.php`,
+  `plugins/coppermine-importer/admin/sync_metadata.php`,
+  `plugins/coppermine-importer/version.php`,
+  `plugins/coppermine-importer/plugin.json`):
+  Completes TODO item 3. Adds an **Auto-Detect from Coppermine Installation** panel
+  to the credentials step of both the main import wizard and the Metadata Sync tool.
+  The panel reads `include/config.inc.php` from a supplied filesystem path and
+  pre-fills all five database fields (host, name, user, password, prefix) in one
+  click — no more copy-pasting credentials from a text editor.
+
+  **`CoppermineConfigDetector`** (`CoppermineConfigDetector.php`) — new static
+  service class. Responsibilities:
+  - `findInstallations(string $root): list<string>` — searches the supplied path
+    for readable `include/config.inc.php` files. Handles three cases: (1) the path
+    IS a config file, (2) the path is the CPG root (has `include/config.inc.php`
+    directly), and (3) the path is a parent directory — scanning subdirectories up
+    to 4 levels deep while skipping `albums/`, `themes/`, `.git/`, and similar
+    non-installation directories. Returns all found paths so multiple co-hosted
+    installations are surfaced for selection. Symbolic links are not followed.
+  - `parseConfig(string $config_path): array` — reads the config file as **plain
+    text** (never `include`d or `eval`'d). Strips block comments and single-line
+    comments, then extracts `$CONFIG['key'] = 'value';` assignments via regex
+    supporting both single- and double-quoted strings with backslash-escape
+    handling. Returns `{dbserver, dbname, dbuser, dbpass, TABLE_PREFIX}`. Throws
+    `RuntimeException` on file-not-found, permission errors, oversized files
+    (> 1 MiB), and missing required keys. **Exception messages never contain
+    credential values.**
+  - `hasConfigFile(string $root): bool` — non-destructive existence check.
+
+  **`ajax_detect_config.php`** — new AJAX-only endpoint. Two actions:
+  - `find`: accepts `cpg_path` POST param; calls `findInstallations()`; on a
+    single find parses and returns the full config (including password, for
+    form pre-fill); on multiple finds stores the paths **in session** and returns
+    only metadata (dbname, dbserver, relative path) without passwords.
+  - `select`: accepts an integer `select_index` POST param; resolves it against
+    the server-side session list (client cannot supply a path directly); parses
+    and returns the full config. Session candidate list is cleared after use.
+    Enforces CSRF and admin authentication on every request. Passwords never appear
+    in error messages, server logs, or the multi-install list response.
+
+  **UI changes (both `admin/index.php` and `admin/sync_metadata.php`):**
+  - An **Auto-Detect from Coppermine Installation** card appears above the
+    credentials form with a path input (pre-filled from the last successful
+    detection, shared across tools via `$_SESSION['lumora_cpg_last_detect_path']`)
+    and a **Detect Settings** button. Enter triggers detection too.
+  - On a **single installation found**: form fields are populated immediately;
+    a green ✓ status line prompts the admin to review before clicking Test Connection.
+  - On **multiple installations found**: a selection list is shown with each
+    installation's relative path and database name. A **Use Selected Installation**
+    button loads the chosen config into the form.
+  - On **error**: a red ✗ status line shows the server error message.
+  - All form fields remain fully editable after detection so values can be
+    corrected before connecting.
+  - Both files updated to `require_once CoppermineConfigDetector.php`.
+  - Plugin bumped to **v1.2.0** (`version.php`, `plugin.json`).
+
+---
 
 ### Security
 
 - **Login rate limiting** (`admin/login.php`): added IP-based brute-force
   protection. Failed attempts are tracked in `cache/.login_ratelimit.json`
-  using a 15-minute sliding window. After 5 failures the form is disabled
+  using a 15-minute sliding window. After 5 failures the form is disableds
   client-side, a 2-second server-side delay is enforced, and a lockout message
   is shown. Every individual failure also adds a 1-second `usleep()` delay.
   IP record is cleared on successful authentication.
