@@ -70,7 +70,7 @@ $sort_base = $base_url . 'album.php?album=' . $album_id . '&sort=';
 
 // ── Build page ────────────────────────────────────────────────────────────────
 $desc_html = !empty($album['description'])
-    ? '<p class="text-muted mb-3">' . nl2br(h($album['description'])) . '</p>'
+    ? '<p class="lum-album-desc">' . nl2br(h($album['description'])) . '</p>'
     : '';
 
 $meta = '<small class="text-muted">'

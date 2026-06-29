@@ -5,11 +5,14 @@ declare(strict_types=1);
  *
  * Actions: list (default), new, edit, save, delete
  *
- * List view pagination:
- *   - per_page: read from ?per_page=N, persisted in $_SESSION['lum_adm_per_page_categories'].
- *   - page:     read from ?page=N; clamped to [1, total_pages] by lumora_pagination().
- *   - $all_cats (full flat list) is fetched unconditionally: used for the parent-name
- *     lookup map in the list view AND for the parent dropdown in the new/edit form.
+ * List view displays ALL categories as a parent/child hierarchy tree.
+ * The full tree is always shown (no pagination); categories are ordered by
+ * pos then name within each level. Edit and Delete buttons are present on
+ * every row and continue to function exactly as before.
+ *
+ * $all_cats is fetched once unconditionally via getAllCategoriesWithCounts()
+ * and serves double duty: (1) the new/edit parent dropdown, (2) the tree
+ * view with album and subcategory counts alongside each category name.
  */
 define('LUMORA_ENTRY', true);
 require_once dirname(__DIR__) . '/include/bootstrap.php';
@@ -26,12 +29,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $act = $_POST['action'] ?? '';
 
     if ($act === 'save') {
-        $edit_id         = lumora_int($_POST['id']             ?? 0, 0, 0);
-        $name            = trim($_POST['name']                 ?? '');
-        $desc            = trim($_POST['description']          ?? '');
-        $parent_id       = lumora_int($_POST['parent_id']      ?? 0, 0, 0);
-        $pos             = lumora_int($_POST['pos']             ?? 0, 0, 0);
-        $thumb_image_id  = lumora_int($_POST['thumb_image_id'] ?? 0, 0, 0);
+        $edit_id        = lumora_int($_POST['id']             ?? 0, 0, 0);
+        $name           = trim($_POST['name']                 ?? '');
+        $desc           = trim($_POST['description']          ?? '');
+        $parent_id      = lumora_int($_POST['parent_id']      ?? 0, 0, 0);
+        $pos            = lumora_int($_POST['pos']             ?? 0, 0, 0);
+        $thumb_image_id = lumora_int($_POST['thumb_image_id'] ?? 0, 0, 0);
 
         if ($name === '') {
             lum_flash('Category name is required.', 'danger');
@@ -94,18 +97,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ── Common setup ──────────────────────────────────────────────────────────────
-// $all_cats is used for: (1) new/edit parent dropdown, (2) id→name map in list.
-$all_cats = get_all_categories_flat();
+// getAllCategoriesWithCounts() returns a superset of getAllCategoriesFlat():
+// same columns plus album_count and subcategory_count. All callers that
+// previously used the flat version continue to work unchanged.
+$all_cats = GalleryService::getAllCategoriesWithCounts();
 $csrf     = h(lumora_csrf_token());
 $base_h   = h($base);
 
-// Build parent dropdown helper.
+// ── Parent dropdown helper ────────────────────────────────────────────────────
 function cat_parent_options(array $cats, int $exclude_id = 0, int $selected = 0): string
 {
     $html = '<option value="0">— Root (no parent) —</option>';
     foreach ($cats as $c) {
         if ((int)$c['id'] === $exclude_id) continue;
-        $sel = ((int)$c['id'] === $selected) ? ' selected' : '';
+        $sel  = ((int)$c['id'] === $selected) ? ' selected' : '';
         $html .= '<option value="' . (int)$c['id'] . '"' . $sel . '>'
             . h(($c['parent_id'] > 0 ? '— ' : '') . $c['name'])
             . '</option>';
@@ -113,7 +118,92 @@ function cat_parent_options(array $cats, int $exclude_id = 0, int $selected = 0)
     return $html;
 }
 
-// ── New / Edit form ─────────────────────────────────────────────────────────
+// ── Category tree render ──────────────────────────────────────────────────────
+/**
+ * Recursively render <tr> rows for the admin category hierarchy table.
+ *
+ * Each call expands one level of children under $parent_id and recurses into
+ * their children, producing a depth-first ordering that matches the visual tree.
+ * A $visited ref-array guards against cycles caused by corrupt parent_id values.
+ *
+ * @param array<int, list<array<string, mixed>>> $cats_by_parent  parent_id => [category rows]
+ * @param int                                    $parent_id       Parent to expand.
+ * @param int                                    $depth           Nesting depth (0 = root).
+ * @param string                                 $base_h          HTML-escaped base URL.
+ * @param string                                 $csrf            HTML-escaped CSRF token.
+ * @param array<int, true>                       $visited         Cycle guard, passed by ref.
+ */
+function render_category_tree_rows(
+    array  $cats_by_parent,
+    int    $parent_id,
+    int    $depth,
+    string $base_h,
+    string $csrf,
+    array  &$visited
+): string {
+    if (!isset($cats_by_parent[$parent_id])) return '';
+    $html = '';
+
+    foreach ($cats_by_parent[$parent_id] as $c) {
+        $id = (int) $c['id'];
+        if (isset($visited[$id])) continue; // cycle guard
+        $visited[$id] = true;
+
+        $name_h   = h($c['name']);
+        $albums   = (int) ($c['album_count']       ?? 0);
+        $subs     = (int) ($c['subcategory_count']  ?? 0);
+        $pos_v    = (int) $c['pos'];
+        $edit_url = h($base_h . '?action=edit&id=' . $id);
+        $del_conf = h('Delete category \'' . $c['name'] . '\'? Child items will be moved to parent.');
+
+        // Visual depth: 20 px per level, tree connector glyph for children.
+        $indent_px = $depth * 20;
+        $connector = $depth > 0
+            ? '<span class="lum-tree-connector" aria-hidden="true">└ </span>'
+            : '';
+
+        $name_cell = '<div class="lum-tree-name" style="padding-left:' . $indent_px . 'px">'
+            . $connector . $name_h . '</div>';
+
+        // Album count badge (shown on every row).
+        $album_badge = $albums > 0
+            ? '<span class="badge rounded-pill text-bg-secondary">' . $albums . '</span>'
+            : '<span class="text-muted small">—</span>';
+
+        // Subcategory count indicator (only when > 0; collapsed into the Name cell).
+        $sub_indicator = $subs > 0
+            ? ' &nbsp;<span class="lum-tree-sub-count text-muted small" title="'
+              . $subs . ' direct sub-categor' . ($subs === 1 ? 'y' : 'ies') . '">'
+              . '(' . $subs . ' ↳)</span>'
+            : '';
+
+        $html .=
+            '<tr>'
+            . '<td>' . $name_cell . $sub_indicator . '</td>'
+            . '<td>' . $album_badge . '</td>'
+            . '<td class="text-muted small">' . $pos_v . '</td>'
+            . '<td><a href="' . $edit_url . '" class="btn btn-sm btn-outline-secondary">Edit</a></td>'
+            . '<td>'
+            .   '<form method="post" action="' . $base_h . '" data-confirm="' . $del_conf . '"'
+            .       ' onsubmit="return confirm(this.dataset.confirm)">'
+            .     '<input type="hidden" name="action"     value="delete">'
+            .     '<input type="hidden" name="id"         value="' . $id . '">'
+            .     '<input type="hidden" name="csrf_token" value="' . $csrf . '">'
+            .     '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>'
+            .   '</form>'
+            . '</td>'
+            . '</tr>';
+
+        // Recurse into children.
+        $html .= render_category_tree_rows(
+            $cats_by_parent, $id, $depth + 1, $base_h, $csrf, $visited
+        );
+    }
+
+    return $html;
+}
+
+// ── New / Edit form ───────────────────────────────────────────────────────────
 if ($action === 'new' || $action === 'edit') {
     $cat = ($action === 'edit' && $id > 0) ? get_category($id) : null;
     if ($action === 'edit' && !$cat) {
@@ -121,14 +211,14 @@ if ($action === 'new' || $action === 'edit') {
         lumora_redirect($base);
     }
 
-    $title     = $action === 'new' ? 'New Category' : 'Edit Category';
-    $name_v    = h($cat['name'] ?? '');
-    $desc_v    = h($cat['description'] ?? '');
-    $parent_v  = (int)($cat['parent_id'] ?? 0);
-    $pos_v     = (int)($cat['pos'] ?? 0);
-    $id_v      = (int)($cat['id'] ?? 0);
-    $thumb_v   = (int)($cat['thumb_image_id'] ?? 0);
-    $par_opts  = cat_parent_options($all_cats, $id_v, $parent_v);
+    $title    = $action === 'new' ? 'New Category' : 'Edit Category';
+    $name_v   = h($cat['name']           ?? '');
+    $desc_v   = h($cat['description']    ?? '');
+    $parent_v = (int)($cat['parent_id']  ?? 0);
+    $pos_v    = (int)($cat['pos']        ?? 0);
+    $id_v     = (int)($cat['id']         ?? 0);
+    $thumb_v  = (int)($cat['thumb_image_id'] ?? 0);
+    $par_opts = cat_parent_options($all_cats, $id_v, $parent_v);
 
     $content = <<<HTML
 <a href="{$base_h}" class="btn btn-sm btn-outline-secondary mb-3">← Back to list</a>
@@ -167,101 +257,44 @@ HTML;
     lum_admin_page($title, $content, 'categories');
 }
 
-// ── List ─────────────────────────────────────────────────────────────────────
+// ── List — hierarchy tree ─────────────────────────────────────────────────────
 
-// Build id→name map from the full category list (used for parent-name lookup).
-// This covers categories that may not be on the current page.
-$cat_map = array_column($all_cats, 'name', 'id');
-
-// Per-page: read from GET, persist in session, fall back to default of 25.
-$valid_per_page = [25, 50, 100];
-$raw_per_page   = lumora_int($_GET['per_page'] ?? 0, 0, 0);
-if (in_array($raw_per_page, $valid_per_page, true)) {
-    $_SESSION['lum_adm_per_page_categories'] = $raw_per_page;
-    $per_page = $raw_per_page;
-} else {
-    $per_page = (int) ($_SESSION['lum_adm_per_page_categories'] ?? 25);
-    if (!in_array($per_page, $valid_per_page, true)) $per_page = 25;
+// Build parent_id → [child categories] map for the recursive render.
+$cats_by_parent = [];
+foreach ($all_cats as $c) {
+    $cats_by_parent[(int) $c['parent_id']][] = $c;
 }
 
-// Current page (lumora_pagination() will clamp it to [1, total_pages]).
-$page = lumora_int($_GET['page'] ?? 1, 1, 1);
+// Summary line.
+$total   = count($all_cats);
+$lbl     = $total === 1 ? 'category' : 'categories';
+$summary = $total > 0 ? number_format($total) . ' ' . $lbl : '0 categories';
 
-// Database queries — only records for the current page are loaded.
-$total      = GalleryService::countAllCategories();
-$paged_cats = GalleryService::getPaginatedCategoriesFlat($page, $per_page);
+// Render tree rows starting from root (parent_id = 0).
+$visited = [];
+$rows    = render_category_tree_rows($cats_by_parent, 0, 0, $base_h, $csrf, $visited);
 
-// Pagination descriptor.
-$url_pattern = $base . '?per_page=' . $per_page . '&page=%d';
-$pag         = lumora_pagination($total, $per_page, $page, $url_pattern);
-
-// Row HTML.
-$rows = '';
-if (empty($paged_cats)) {
-    $empty_msg = ($total === 0)
-        ? 'No categories yet. <a href="' . $base_h . '?action=new">Create one</a>.'
-        : 'No categories on this page.';
-    $rows = '<tr><td colspan="5" class="text-center text-muted py-4">' . $empty_msg . '</td></tr>';
-} else {
-    foreach ($paged_cats as $c) {
-        $name_h   = h($c['name']);
-        $parent_h = $c['parent_id'] > 0
-            ? h($cat_map[$c['parent_id']] ?? '—')
-            : '<span class="text-muted">Root</span>';
-        $edit_url = h($base . '?action=edit&id=' . (int)$c['id']);
-        $del_conf = h('Delete category \'' . $c['name'] . '\'? Child items will be moved to parent.');
-        $rows .= <<<HTML
-<tr>
-  <td>{$name_h}</td>
-  <td>{$parent_h}</td>
-  <td>{$c['pos']}</td>
-  <td><a href="{$edit_url}" class="btn btn-sm btn-outline-secondary">Edit</a></td>
-  <td>
-    <form method="post" action="{$base_h}" data-confirm="{$del_conf}" onsubmit="return confirm(this.dataset.confirm)">
-      <input type="hidden" name="action"     value="delete">
-      <input type="hidden" name="id"         value="{$c['id']}">
-      <input type="hidden" name="csrf_token" value="{$csrf}">
-      <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-    </form>
-  </td>
-</tr>
-HTML;
-    }
+if ($rows === '') {
+    $rows = '<tr><td colspan="5" class="text-center text-muted py-4">'
+        . 'No categories yet. <a href="' . $base_h . '?action=new">Create one</a>.'
+        . '</td></tr>';
 }
 
-// Item count summary.
-if ($total === 0) {
-    $summary = '0 categories';
-} else {
-    $label   = $total === 1 ? 'category' : 'categories';
-    $summary = 'Showing ' . $pag['start_item'] . '–' . $pag['end_item'] . ' of ' . $total . ' ' . $label;
-}
-
-// Per-page selector and pagination controls.
-$per_page_sel = lum_per_page_selector($base, [], $per_page);
-$pag_html     = lum_admin_pagination($pag);
-$new_h        = h($base . '?action=new');
-
-$pag_bar = $pag_html
-    ? '<div class="d-flex justify-content-center my-2">' . $pag_html . '</div>'
-    : '';
+$new_h = h($base . '?action=new');
 
 $content =
-    // Header: summary left, controls + new-category button right.
-    '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">'
-    . '<span class="text-muted small">' . $summary . '</span>'
-    . '<div class="d-flex align-items-center gap-2">'
-    . $per_page_sel
+    '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">'
+    . '<span class="text-muted small">' . h($summary) . '</span>'
     . '<a href="' . $new_h . '" class="btn btn-primary btn-sm">+ New Category</a>'
     . '</div>'
-    . '</div>'
-    // Top pagination.
-    . $pag_bar
-    // Table.
     . '<div class="table-responsive"><table class="table table-hover lum-adm-table align-middle">'
-    . '<thead><tr><th>Name</th><th>Parent</th><th>Pos</th><th></th><th></th></tr></thead>'
-    . '<tbody>' . $rows . '</tbody></table></div>'
-    // Bottom pagination.
-    . $pag_bar;
+    . '<thead><tr>'
+    . '<th>Name</th>'
+    . '<th style="width:90px">Albums</th>'
+    . '<th style="width:60px">Pos</th>'
+    . '<th style="width:70px"></th>'
+    . '<th style="width:90px"></th>'
+    . '</tr></thead>'
+    . '<tbody>' . $rows . '</tbody></table></div>';
 
 lum_admin_page('Categories', $content, 'categories');

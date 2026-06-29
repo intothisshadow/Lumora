@@ -458,8 +458,9 @@ HTML;
             }
 
             $thumb_html = self::renderItemThumb($item, $type, $url);
+            $desc_class = $type === 'album' ? 'lum-album-desc' : 'lum-cat-desc';
             $desc_html  = !empty($item['description'])
-                ? '<p class="lum-card-desc text-muted small mb-0">' . h($item['description']) . '</p>'
+                ? '<p class="' . $desc_class . '">' . h($item['description']) . '</p>'
                 : '';
 
             $html .= <<<HTML

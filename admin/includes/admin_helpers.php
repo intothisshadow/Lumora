@@ -190,7 +190,6 @@ function lum_admin_page(string $title, string $content, string $active = ''): ne
 
     $nav_items = [
         'dashboard'    => ['icon' => '📊', 'label' => 'Dashboard',              'url' => 'dashboard.php'],
-        'users'        => ['icon' => '👥', 'label' => 'Users',                  'url' => 'users.php'],
         'batch'        => ['icon' => '⬆️', 'label' => 'Batch Add',              'url' => 'batch.php'],
         'categories'   => ['icon' => '📁', 'label' => 'Categories',             'url' => 'categories.php'],
         'albums'       => ['icon' => '🖼️', 'label' => 'Albums',                 'url' => 'albums.php'],
@@ -201,6 +200,7 @@ function lum_admin_page(string $title, string $content, string $active = ''): ne
         'migrate'      => ['icon' => '📥', 'label' => 'Import',                 'url' => 'migrate.php'],
         'updates'      => ['icon' => '🔔', 'label' => 'Updates' . $update_badge, 'url' => 'update.php'],
         'account'      => ['icon' => '👤', 'label' => 'Account',                'url' => 'account.php'],
+        'users'        => ['icon' => '👥', 'label' => 'Users',                  'url' => 'users.php'],
     ];
 
     $nav_html = '';

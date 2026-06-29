@@ -8,7 +8,101 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 
-## [Unreleased]
+## [1.9.2] — 2026-06-29
+
+### Added
+
+- **Category description styling** (`index.php`, `themes/default/style.css`,
+  `themes/classic-fansite/style.css`): Category descriptions on category pages are now
+  rendered with a `lum-cat-desc` class instead of a plain `text-muted` paragraph. Both
+  themes style the block with a left accent border, subtle background tint, padded text,
+  and relaxed line-height — matching the established `.lum-album-desc` pattern.
+
+- **Hierarchy tree view in Album Manager** (`admin/albums.php`, `GalleryService.php`,
+  `admin/admin.css`): The Albums page now opens in a hierarchy view by default. Albums
+  are grouped under their category, with subcategories indented beneath their parent
+  using a `└ ` connector glyph and 20 px depth steps. Uncategorized albums appear at
+  the top in a dedicated *(No Category)* section. Each category section header shows
+  the category name in bold with a badge indicating the number of direct albums.
+  The hierarchy is built in PHP from two queries (`getAllCategoriesWithCounts` and
+  `getAllAdminAlbumsGrouped`); a ref-array cycle guard prevents infinite recursion on
+  corrupt `parent_id` values. When a search term or category filter is applied, the
+  page falls back to the existing flat paginated table (with full search, per-page
+  selector, and pagination) and a ✕ Clear button returns to hierarchy mode.
+  New helper functions `render_album_row()` and `render_album_tree()` encapsulate the
+  tree rendering; the flat-mode row loop and all management actions (edit, batch add,
+  manage images, view, delete) are preserved unchanged.
+
+- **Hierarchy tree view in Category Manager** (`admin/categories.php`, `GalleryService.php`,
+  `admin/admin.css`): The Categories page now displays all categories as a full
+  parent/child tree instead of a flat paginated list. Root categories appear at the
+  top level; child categories are indented beneath their parent with a `└ ` connector
+  glyph (20 px per depth level). Each row shows the category name, a badge with the
+  number of direct albums, the position value, and Edit / Delete buttons — all actions
+  continue to work exactly as before. A subcategory count indicator *(N ↳)* appears
+  alongside the name when a category has direct children. The tree is built from a
+  single `getAllCategoriesWithCounts()` query (a superset of the previous flat-list
+  query, adding `album_count` and `subcategory_count` aggregates). The same data
+  drives both the tree view and the new/edit parent dropdown, eliminating a second
+  query. A ref-array cycle guard in `render_category_tree_rows()` protects against
+  corrupt `parent_id` values. Pagination is removed from the list view; the complete
+  tree is always shown.
+
+- **Album description styling** (`album.php`, `themes/default/style.css`,
+  `themes/classic-fansite/style.css`): Album descriptions are now rendered with a
+  `lum-album-desc` class instead of a plain `text-muted` paragraph. Both themes style
+  the block with a left accent border, subtle background tint, padded text, and
+  relaxed line-height, giving descriptions a clear visual identity on the album page.
+
+- **Album name search in Album Manager** (`admin/albums.php`, `GalleryService.php`):
+  A search field now appears above the album list. Administrators can type part or
+  all of an album name to instantly narrow the list to matching albums (case-insensitive
+  partial match via a parameterized `LIKE` query on `a.title`). When a search is active,
+  the summary line shows the match count and term (e.g. "12 albums matching **xena**").
+  A ✕ Clear button resets the list. Submitting an empty search also returns the full list.
+  The search query is preserved in pagination links and the per-page selector so the
+  filtered view survives page navigation and page-size changes. When no albums match,
+  a friendly inline message with a Clear link is shown in the table body. The service
+  layer (`countAdminAlbums` and `getAdminAlbums`) now accept an optional `$search`
+  parameter built with a dynamic WHERE clause, keeping the path clear for adding
+  additional filter fields (e.g. category, visibility) in the future.
+
+  
+
+### Fixed
+
+- **Album card descriptions no longer cut off** (`themes/default/style.css`,
+  `themes/classic-fansite/style.css`): The `.lum-card-desc` rule previously applied
+  `-webkit-line-clamp: 2`, truncating album and category descriptions in the card grid
+  to two lines. The clamp has been removed so the full description is always visible.
+
+- **Album card descriptions now styled** (`include/services/ThemeRenderer.php`):
+  Album descriptions in the card grid were rendered with `class="lum-card-desc
+  text-muted small mb-0"` — plain Bootstrap utility classes that produced unstyled
+  grey text. The renderer now picks the correct semantic class per item type:
+  `.lum-album-desc` for album cards and `.lum-cat-desc` for category cards, so
+  descriptions in the grid receive the same left-border, background-tint, and
+  padding styling applied everywhere else.
+
+### Changed
+
+- **Albums shown before sub-categories on category pages** (`index.php`): Within a
+  category, albums are now listed first, followed by sub-categories. Previously
+  sub-categories appeared above albums.
+
+- **Admin sidebar: Users link moved after Account** (`admin/includes/admin_helpers.php`):
+  The Users item now appears at the bottom of the sidebar navigation, after Account,
+  grouping user-management separately from the main gallery workflow items.
+
+- **Coppermine Importer version corrected to v1.3.0** (`plugins/coppermine-importer/version.php`,
+  `plugins/coppermine-importer/plugin.json`): The plugin had been bumped to v1.3.0 in code
+  but all documentation (CHANGELOG, HISTORY.md) still referenced v1.2.0. All references
+  corrected to v1.3.0 to match the actual plugin files.
+
+- **CHANGELOG.md structural repair**: A previous editing session left v1.9.0 content
+  (Staff Account Management, Auto-delete install/ via UpdaterService, Coppermine auto-detect)
+  without a proper `### Added` section header in the [1.9.0] entry. Added the missing
+  header to restore correct CHANGELOG structure.
 
 ---
 
@@ -91,7 +185,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [1.9.0] — 2026-06-25
 
-**Staff Account Management — User Management UI** 
+### Added
+
+- **Staff Account Management — User Management UI** 
 
   **`UserService`** (`include/services/UserService.php`) — new static service class
   loaded by bootstrap.php. Responsibilities:
@@ -265,7 +361,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - All form fields remain fully editable after detection so values can be
     corrected before connecting.
   - Both files updated to `require_once CoppermineConfigDetector.php`.
-  - Plugin bumped to **v1.2.0** (`version.php`, `plugin.json`).
+  - Plugin bumped to **v1.3.0** (`version.php`, `plugin.json`).
 
 ---
 

@@ -68,17 +68,18 @@ if ($view !== '') {
         $content = $breadcrumb;
 
         if (!empty($cat['description'])) {
-            $content .= '<p class="text-muted mb-3">' . nl2br(h($cat['description'])) . '</p>';
-        }
-
-        if (!empty($subcats)) {
-            $content .= '<h2 class="lum-section-title">Sub-categories</h2>'
-                . lumora_render_categories($subcats);
+            $content .= '<p class="lum-cat-desc">' . nl2br(h($cat['description'])) . '</p>';
         }
 
         if (!empty($albums)) {
-            $content .= '<h2 class="lum-section-title mt-4">Albums</h2>'
+            $content .= '<h2 class="lum-section-title">Albums</h2>'
                 . lumora_render_catgrid($albums, 'album');
+        }
+
+        if (!empty($subcats)) {
+            $mt = !empty($albums) ? ' mt-4' : '';
+            $content .= '<h2 class="lum-section-title' . $mt . '">Sub-categories</h2>'
+                . lumora_render_categories($subcats);
         }
 
         if (empty($subcats) && empty($albums)) {

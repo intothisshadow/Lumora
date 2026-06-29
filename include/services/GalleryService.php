@@ -208,6 +208,32 @@ class GalleryService
         );
     }
 
+    /**
+     * Get all categories as a flat list with album and subcategory counts.
+     *
+     * Returns a superset of getAllCategoriesFlat() — every column from the
+     * categories table plus two aggregates:
+     *   album_count       — direct albums in this category (category_id = c.id)
+     *   subcategory_count — direct children (parent_id = c.id)
+     *
+     * Used by the admin hierarchy tree (categories.php) and as the data source
+     * for new/edit dropdowns, replacing getAllCategoriesFlat() wherever counts
+     * are also needed.
+     *
+     * @return list<array{id: int, name: string, parent_id: int, pos: int, description: string,
+     *                    thumb_image_id: int, album_count: int, subcategory_count: int}>
+     */
+    public static function getAllCategoriesWithCounts(): array
+    {
+        return LumoraDB::fetchAll(
+            'SELECT c.*,
+                (SELECT COUNT(*) FROM `{PREFIX}albums`     a  WHERE a.category_id = c.id) AS album_count,
+                (SELECT COUNT(*) FROM `{PREFIX}categories` sc WHERE sc.parent_id  = c.id) AS subcategory_count
+             FROM `{PREFIX}categories` c
+             ORDER BY c.parent_id ASC, c.pos ASC, c.name ASC'
+        );
+    }
+
     // ── Albums ────────────────────────────────────────────────────────────────
 
     /**
@@ -266,20 +292,32 @@ class GalleryService
     // ── Admin Album Queries ───────────────────────────────────────────────────
 
     /**
-     * Count albums for the admin list, with optional category filter.
+     * Count albums for the admin list, with optional category filter and title search.
      *
-     * @param int $cat_id Filter by category; 0 = all categories.
+     * @param int    $cat_id Filter by category; 0 = all categories.
+     * @param string $search Partial case-insensitive title match; '' = no filter.
      * @return int Total album count.
      */
-    public static function countAdminAlbums(int $cat_id = 0): int
+    public static function countAdminAlbums(int $cat_id = 0, string $search = ''): int
     {
+        $where  = [];
+        $params = [];
+
         if ($cat_id > 0) {
-            return (int) LumoraDB::fetchValue(
-                'SELECT COUNT(*) FROM `{PREFIX}albums` WHERE category_id = ?',
-                [$cat_id]
-            );
+            $where[]  = 'category_id = ?';
+            $params[] = $cat_id;
         }
-        return (int) LumoraDB::fetchValue('SELECT COUNT(*) FROM `{PREFIX}albums`');
+        if ($search !== '') {
+            $where[]  = 'title LIKE ?';
+            $params[] = '%' . $search . '%';
+        }
+
+        $sql = 'SELECT COUNT(*) FROM `{PREFIX}albums`';
+        if (!empty($where)) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
+        }
+
+        return (int) LumoraDB::fetchValue($sql, $params);
     }
 
     /**
@@ -287,38 +325,87 @@ class GalleryService
      *
      * Includes cat_name (categories join) and image_count (approved images only).
      * Ordered by category name, album position, then title.
+     * Optional $search filters by partial case-insensitive album title match.
      *
-     * @param int $cat_id   Filter by category; 0 = all categories.
-     * @param int $page     1-based page number.
-     * @param int $per_page Albums per page.
+     * @param int    $cat_id   Filter by category; 0 = all categories.
+     * @param int    $page     1-based page number.
+     * @param int    $per_page Albums per page.
+     * @param string $search   Partial case-insensitive title match; '' = no filter.
      * @return list<array{id: int, category_id: int, folder: string, title: string,
      *                    description: string, visibility: int, pos: int, hits: int,
      *                    thumb_image_id: int, created_at: string,
      *                    cat_name: string|null, image_count: int}>
      */
-    public static function getAdminAlbums(int $cat_id, int $page, int $per_page): array
+    public static function getAdminAlbums(int $cat_id, int $page, int $per_page, string $search = ''): array
     {
         $offset = max(0, ($page - 1) * $per_page);
+
+        $where  = [];
+        $params = [];
+
         if ($cat_id > 0) {
-            return LumoraDB::fetchAll(
-                'SELECT a.*, c.name AS cat_name,
-                        (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
-                 FROM `{PREFIX}albums` a
-                 LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id
-                 WHERE a.category_id = ?
-                 ORDER BY c.name ASC, a.pos ASC, a.title ASC
-                 LIMIT ? OFFSET ?',
-                [$cat_id, $per_page, $offset]
-            );
+            $where[]  = 'a.category_id = ?';
+            $params[] = $cat_id;
         }
+        if ($search !== '') {
+            $where[]  = 'a.title LIKE ?';
+            $params[] = '%' . $search . '%';
+        }
+
+        $where_sql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+
+        $params[] = $per_page;
+        $params[] = $offset;
+
         return LumoraDB::fetchAll(
-            'SELECT a.*, c.name AS cat_name,
-                    (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count
-             FROM `{PREFIX}albums` a
-             LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id
-             ORDER BY c.name ASC, a.pos ASC, a.title ASC
-             LIMIT ? OFFSET ?',
-            [$per_page, $offset]
+            "SELECT a.*, c.name AS cat_name,\n"
+            . "        (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count\n"
+            . 'FROM `{PREFIX}albums` a' . "\n"
+            . 'LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id' . "\n"
+            . "{$where_sql}\n"
+            . 'ORDER BY c.name ASC, a.pos ASC, a.title ASC' . "\n"
+            . 'LIMIT ? OFFSET ?',
+            $params
+        );
+    }
+
+    /**
+     * Get all albums for the admin hierarchy tree view.
+     *
+     * Returns every album row with its category name (cat_name) and approved
+     * image count (image_count), ordered by category ID then position then title.
+     * No pagination — the complete result set is returned for in-PHP tree building.
+     *
+     * When $search is non-empty the result is filtered to albums whose title matches
+     * a partial case-insensitive LIKE. This is the same match used by countAdminAlbums
+     * and getAdminAlbums so both can be called independently.
+     *
+     * @param string $search Partial case-insensitive title match; '' = no filter.
+     * @return list<array{id: int, category_id: int, folder: string, title: string,
+     *                    description: string, visibility: int, pos: int, hits: int,
+     *                    thumb_image_id: int, created_at: string,
+     *                    cat_name: string|null, image_count: int}>
+     */
+    public static function getAllAdminAlbumsGrouped(string $search = ''): array
+    {
+        $where  = [];
+        $params = [];
+
+        if ($search !== '') {
+            $where[]  = 'a.title LIKE ?';
+            $params[] = '%' . $search . '%';
+        }
+
+        $where_sql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+
+        return LumoraDB::fetchAll(
+            "SELECT a.*, c.name AS cat_name,\n"
+            . "       (SELECT COUNT(*) FROM `{PREFIX}images` i WHERE i.album_id = a.id AND i.approved = 1) AS image_count\n"
+            . "FROM `{PREFIX}albums` a\n"
+            . "LEFT JOIN `{PREFIX}categories` c ON c.id = a.category_id\n"
+            . "{$where_sql}\n"
+            . "ORDER BY a.category_id ASC, a.pos ASC, a.title ASC",
+            $params
         );
     }
 

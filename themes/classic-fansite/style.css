@@ -319,12 +319,10 @@
   color: var(--fs-accent-light);
 }
 
+/* Card description — show full text, no line-clamp */
 .lum-card-desc {
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   font-size: .82rem;
+  margin-top: .35rem;
 }
 
 /* ── Card info rows (album / category meta) ───────────────── */
@@ -475,6 +473,30 @@
   --bs-btn-active-color:       #fff;
   --bs-btn-active-bg:          var(--fs-accent);
   --bs-btn-active-border-color: var(--fs-accent);
+}
+
+/* ── Album description ────────────────────────────────────── */
+.lum-album-desc {
+  color: #444;
+  background: var(--fs-panel-bg);
+  border-left: 3px solid var(--fs-accent);
+  border-radius: 0 var(--fs-radius) var(--fs-radius) 0;
+  padding: .75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: .9rem;
+  line-height: 1.6;
+}
+
+/* ── Category description ─────────────────────────────────── */
+.lum-cat-desc {
+  color: #444;
+  background: var(--fs-panel-bg);
+  border-left: 3px solid var(--fs-accent);
+  border-radius: 0 var(--fs-radius) var(--fs-radius) 0;
+  padding: .75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: .9rem;
+  line-height: 1.6;
 }
 
 /* ── Who Is Online strip ──────────────────────────────────── */

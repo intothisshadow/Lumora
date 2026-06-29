@@ -128,6 +128,40 @@ html, body { height: 100%; }
 }
 
 /* ── Responsive ───────────────────────────────────────────── */
+/* ── Tree hierarchy (categories.php / albums.php) ──────────── */
+
+/* Connector glyph (└) used for nested rows */
+.lum-tree-connector {
+  color: #adb5bd;
+  user-select: none;
+  font-family: monospace;
+  margin-right: .1rem;
+}
+
+/* Category name cell: wraps connector + text */
+.lum-tree-name {
+  display: inline-block;
+}
+
+/* Subcategory count aside (e.g. "(3 ↳)") */
+.lum-tree-sub-count {
+  font-size: .75rem;
+}
+
+/* Section-header rows for the albums hierarchy table */
+.lum-tree-cat-header td {
+  background: #eef1ff;
+  border-top: 2px solid #c9d1f0;
+  padding-top: .55rem;
+  padding-bottom: .55rem;
+  font-size: .875rem;
+}
+
+/* First header row needn't have a top border */
+.lum-tree-cat-header:first-child td {
+  border-top: none;
+}
+
 @media (max-width: 767px) {
   .lum-admin-sidebar {
     position: static;

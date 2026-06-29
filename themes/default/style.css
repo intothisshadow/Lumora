@@ -151,11 +151,9 @@
   color: #adb5bd;
 }
 
+/* Card description — show full text, no line-clamp */
 .lum-card-desc {
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  margin-top: .35rem;
 }
 
 /* ── Card info rows (album / category meta) ───────────────── */
@@ -288,6 +286,30 @@
   border-bottom: 2px solid #e0e4e8;
   padding-bottom: .4rem;
   margin-bottom: 1rem;
+}
+
+/* ── Album description ────────────────────────────────────── */
+.lum-album-desc {
+  color: #495057;
+  background: #f8f9fa;
+  border-left: 3px solid var(--lum-accent);
+  border-radius: 0 var(--lum-card-radius) var(--lum-card-radius) 0;
+  padding: .75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: .95rem;
+  line-height: 1.6;
+}
+
+/* ── Category description ─────────────────────────────────── */
+.lum-cat-desc {
+  color: #495057;
+  background: #f8f9fa;
+  border-left: 3px solid var(--lum-accent);
+  border-radius: 0 var(--lum-card-radius) var(--lum-card-radius) 0;
+  padding: .75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: .95rem;
+  line-height: 1.6;
 }
 
 /* ── Responsive tweaks ────────────────────────────────────── */

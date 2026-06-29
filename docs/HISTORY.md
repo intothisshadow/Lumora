@@ -4,6 +4,38 @@ Long-term archive of completed work, migrated from TODO.md on release.
 
 ---
 
+## v1.9.2 — Released 2026-06-29
+
+### Added
+
+- [x] **Hierarchy tree view in Album Manager** (`admin/albums.php`, `GalleryService.php`, `admin/admin.css`): Albums page opens in a hierarchy view by default. Albums grouped under their category; subcategories indented with `└ ` connector glyph and 20 px depth steps. Uncategorized albums in a dedicated *(No Category)* section. Category section headers show direct-album badge. Built from two queries (`getAllCategoriesWithCounts`, `getAllAdminAlbumsGrouped`); ref-array cycle guard prevents infinite recursion on corrupt `parent_id` values. Falls back to flat paginated table when search or category filter is active (✕ Clear returns to hierarchy mode). New `render_album_row()` and `render_album_tree()` helper functions added.
+
+- [x] **Hierarchy tree view in Category Manager** (`admin/categories.php`, `GalleryService.php`, `admin/admin.css`): Categories page displays full parent/child tree instead of flat paginated list. Root categories at top level; children indented with `└ ` connector glyph (20 px per depth level). Each row shows name, direct-album badge, position, and Edit/Delete buttons. *(N ↳)* subcategory indicator shown alongside names with direct children. Built from single `getAllCategoriesWithCounts()` query; same data drives both tree view and parent dropdown. Cycle guard in `render_category_tree_rows()`. Pagination removed from list view.
+
+- [x] **Album name search in Album Manager** (`admin/albums.php`, `GalleryService.php`): Search field above the album list. Case-insensitive partial match via parameterized `LIKE` query on `a.title`. Summary line shows match count and term when active. ✕ Clear button resets the list. Search preserved in pagination links and per-page selector. Friendly "no albums" message when no results. `countAdminAlbums` and `getAdminAlbums` extended with optional `$search` parameter.
+
+- [x] **Album description styling** (`album.php`, `themes/default/style.css`, `themes/classic-fansite/style.css`): Album descriptions on album pages now rendered with `lum-album-desc` class — left accent border, subtle background tint, padded text, relaxed line-height in both bundled themes.
+
+- [x] **Category description styling** (`index.php`, `themes/default/style.css`, `themes/classic-fansite/style.css`): Category descriptions on category pages now rendered with `lum-cat-desc` class — left accent border, subtle background tint, padded text, relaxed line-height in both bundled themes, matching the `.lum-album-desc` pattern.
+
+### Fixed
+
+- [x] **Album card descriptions no longer cut off** (`themes/default/style.css`, `themes/classic-fansite/style.css`): The `.lum-card-desc` rule previously applied `-webkit-line-clamp: 2`, truncating album and category descriptions in the card grid to two lines. Clamp removed so full description is always visible.
+
+- [x] **Album card descriptions now styled** (`include/services/ThemeRenderer.php`): Album descriptions in the card grid were rendered with plain Bootstrap utility classes producing unstyled grey text. Renderer now picks correct semantic class per item type: `.lum-album-desc` for album cards, `.lum-cat-desc` for category cards — both receive the left-border, background-tint, and padding styling applied elsewhere.
+
+### Changed
+
+- [x] **Albums shown before sub-categories on category pages** (`index.php`): Within a category, albums now listed first, followed by sub-categories.
+
+- [x] **Admin sidebar: Users link moved after Account** (`admin/includes/admin_helpers.php`): Users item now appears at the bottom of the sidebar navigation, after Account, grouping user-management separately from the main gallery workflow items.
+
+- [x] **Coppermine Importer version corrected to v1.3.0**: Plugin files (`version.php`, `plugin.json`) had already been bumped to v1.3.0 in code; all documentation references updated from v1.2.0 to v1.3.0 to match.
+
+- [x] **CHANGELOG.md structural repair**: v1.9.0 entries for Staff Account Management, Auto-delete install/ (UpdaterService), and Coppermine auto-detect were left without a `### Added` section header. Header restored.
+
+---
+
 ## v1.9.1 — Released 2026-06-28
 
 ### Fixed
@@ -45,7 +77,7 @@ Long-term archive of completed work, migrated from TODO.md on release.
 
 - [x] **Auto-delete `install/` directory after successful upgrade** (TODO item 1, `include/services/UpdaterService.php`): `stageCleanup()` now automatically removes the `install/` directory when an upgrade completes successfully, using the existing `removeDirectory()` helper. A success or failure detail line is added to the cleanup stage log; a warning is logged on failure; the existing per-page security banner in `admin_helpers.php` remains visible until the directory is gone.
 
-- [x] **Coppermine Importer — Auto-detect database settings** (TODO item 3, plugin bumped to v1.2.0): Adds an **Auto-Detect from Coppermine Installation** panel to the credentials step of both the main import wizard and the Metadata Sync tool. `CoppermineConfigDetector` (new static class) — `findInstallations()` searches for `include/config.inc.php` up to 4 directory levels deep, returning all found paths; `parseConfig()` reads credentials as plain text (never `include`d or `eval`’d); `hasConfigFile()` for non-destructive checks. `ajax_detect_config.php` AJAX endpoint: `find` action parses and returns the full config on a single match, or returns metadata only (paths stored server-side in session) on multiple matches; `select` action resolves a choice by session index. Passwords never appear in error messages, server logs, or the multi-install list response.
+- [x] **Coppermine Importer — Auto-detect database settings** (TODO item 3, plugin bumped to v1.3.0): Adds an **Auto-Detect from Coppermine Installation** panel to the credentials step of both the main import wizard and the Metadata Sync tool. `CoppermineConfigDetector` (new static class) — `findInstallations()` searches for `include/config.inc.php` up to 4 directory levels deep, returning all found paths; `parseConfig()` reads credentials as plain text (never `include`d or `eval`’d); `hasConfigFile()` for non-destructive checks. `ajax_detect_config.php` AJAX endpoint: `find` action parses and returns the full config on a single match, or returns metadata only (paths stored server-side in session) on multiple matches; `select` action resolves a choice by session index. Passwords never appear in error messages, server logs, or the multi-install list response.
 
 ### Changed
 
